@@ -122,6 +122,46 @@ async function call(method, path, token, body) {
   const wbEmpty = XLSX.read(Buffer.from(await noMatch.arrayBuffer()), { type: "buffer" });
   ok(XLSX.utils.sheet_to_json(wbEmpty.Sheets["订单基本信息"]).length === 0, "筛选不存在的季节时导出为空");
 
+  // ---- 导出真正嵌入图片(款式图 + 打卡/验货/跟单照片)，而不是"（有图）"文字或裸链接 ----
+  const pngBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  const fd = new FormData();
+  fd.append("image", new Blob([pngBytes], { type: "image/png" }), "test.png");
+  const upRes = await fetch(BASE + "/upload", { method: "POST", headers: { Authorization: "Bearer " + aT }, body: fd });
+  const upJ = await upRes.json();
+  ok(upRes.status === 200 && upJ.url, "上传测试图片成功(供嵌图测试用)");
+
+  const imgOrder = await call("POST", "/orders", aT, { season: "SS2027", values: { styleNo: "IMGTEST-1", img: [upJ.url] } });
+  ok(imgOrder.status === 200, "创建带款式图的测试订单");
+  const mlog = await call("POST", `/orders/${imgOrder.j.id}/logs`, aT,
+    { key: "mainLog", text: "嵌图测试打卡", process: "车缝", workers: "5", estDone: "2026-08-01", photos: [upJ.url] });
+  ok(mlog.status === 200, "本厂打卡带照片(供嵌图测试用)");
+
+  const exp2 = await fetch(BASE + "/export", { headers: { Authorization: "Bearer " + aT } });
+  const buf2 = Buffer.from(await exp2.arrayBuffer());
+  const AdmZip = require("adm-zip");
+  const zip2 = new AdmZip(buf2);
+  ok(!!zip2.getEntry("xl/drawings/drawing1.xml"), "「订单基本信息」表已嵌入款式图 drawing");
+  ok(!!zip2.getEntry("xl/drawings/drawing2.xml"), "「生产进度」表已嵌入打卡照片 drawing");
+  ok(zip2.getEntry("[Content_Types].xml").getData().toString("utf8").includes("drawing+xml"), "[Content_Types].xml 已声明 drawing 部件类型");
+  const mediaEntries = zip2.getEntries().filter(e => e.entryName.startsWith("xl/media/"));
+  ok(mediaEntries.length > 0, "xlsx 内含真实图片文件(xl/media)");
+  ok(mediaEntries.some(e => e.getData().length === pngBytes.length), "嵌入的图片字节数与原图一致(未损坏)");
+
+  const wb2 = XLSX.read(buf2, { type: "buffer" });
+  const rows1raw = XLSX.utils.sheet_to_json(wb2.Sheets["订单基本信息"], { header: 1 });
+  const styleRowIdx = rows1raw.findIndex(r => r[1] === "IMGTEST-1");
+  ok(styleRowIdx > 0, "「订单基本信息」表能找到测试订单这一行");
+  ok(!(rows1raw[styleRowIdx] || []).includes("（有图）"), "款式图列不再是「（有图）」占位文字");
+  const drawing1Xml = zip2.getEntry("xl/drawings/drawing1.xml").getData().toString("utf8");
+  ok(drawing1Xml.includes(`<xdr:row>${styleRowIdx}</xdr:row>`), "款式图图片锚定在测试订单所在的正确行");
+
+  const rows2raw = XLSX.utils.sheet_to_json(wb2.Sheets["生产进度"], { header: 1 });
+  const logRowIdx = rows2raw.findIndex(r => r[6] === "嵌图测试打卡");
+  ok(logRowIdx > 0, "「生产进度」表能找到测试打卡这一行");
+  ok(!(rows2raw[logRowIdx] || []).some(c => String(c || "").startsWith("/uploads/")), "打卡照片列不再是裸链接文字");
+  const drawing2Xml = zip2.getEntry("xl/drawings/drawing2.xml").getData().toString("utf8");
+  ok(drawing2Xml.includes(`<xdr:row>${logRowIdx}</xdr:row>`), "打卡照片图片锚定在测试打卡所在的正确行");
+
   // no-token blocked
   ok((await call("GET", "/bootstrap", null)).status === 401, "未登录被拦截");
   // 安全：公网"凭手机号自助改密"已移除（原来可盗号）

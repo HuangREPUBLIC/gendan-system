@@ -65,6 +65,121 @@ function extractEmbeddedImages(buf) {
   return images;
 }
 
+/**
+ * extractEmbeddedImages 的反向操作：把真实图片写进导出的 xlsx，而不是"（有图）"文字或裸链接。
+ * placements: [{ sheet: 1起(对应 sheetN.xml 的顺序), row: 0-based(含表头行), col: 0-based, urls: ["/uploads/xxx.jpg", ...] }]
+ * 每个 (sheet,row) 目前只会对应一个照片列（各分表"照片"都是固定的最后一列，或订单基本信息里"款式图"独占一列），
+ * 同一格里多张照片纵向堆叠展示（不会挤占右边其他列的数据），找不到的图片文件直接跳过、不影响其余导出内容。
+ */
+function embedImagesIntoXlsx(buf, placements) {
+  if (!placements.length) return buf;
+  const EMU = 9525, THUMB = 60, GAP = 4;
+  let zip;
+  try { zip = new AdmZip(buf); } catch (e) { return buf; }
+
+  const bySheet = {};
+  placements.forEach(p => { (bySheet[p.sheet] = bySheet[p.sheet] || []).push(p); });
+
+  // 同一张图片可能在多处被引用（比如同一条打卡记录），全局只存一份，省文件体积
+  const mediaCache = {};
+  const mediaList = [];
+  function mediaFor(url) {
+    if (mediaCache[url]) return mediaCache[url];
+    const rel = String(url || "").replace(/^\/+/, "");
+    if (!rel.startsWith("uploads/")) return null;
+    const filePath = path.join(UPLOAD_DIR, path.basename(rel));
+    let data;
+    try { data = fs.readFileSync(filePath); } catch (e) { return null; }
+    const ext = ((path.extname(filePath) || ".jpg").toLowerCase().replace(".", "")) || "jpg";
+    const item = { idx: mediaList.length + 1, ext };
+    mediaList.push({ idx: item.idx, ext, data });
+    mediaCache[url] = item;
+    return item;
+  }
+
+  const drawingOverrides = [];
+
+  Object.keys(bySheet).forEach(sheetNumStr => {
+    const sheetNum = Number(sheetNumStr);
+    const sheetPath = `xl/worksheets/sheet${sheetNum}.xml`;
+    const sheetEntry = zip.getEntry(sheetPath);
+    if (!sheetEntry) return;
+    let sheetXml = sheetEntry.getData().toString("utf8");
+
+    const anchors = [];
+    const drawingRels = [];
+    let relIdx = 1;
+
+    bySheet[sheetNumStr].forEach(p => {
+      const items = (p.urls || []).map(mediaFor).filter(Boolean);
+      if (!items.length) return;
+      items.forEach((item, i) => {
+        const rId = "rId" + (relIdx++);
+        drawingRels.push({ rId, target: `../media/image${item.idx}.${item.ext}` });
+        anchors.push({ col: p.col, row: p.row, rowOff: i * (THUMB + GAP) * EMU, rId });
+      });
+      const htPt = Math.max(20, items.length * (THUMB + GAP) * 0.75 + 3);
+      const excelRow = p.row + 1;
+      const rowRe = new RegExp(`<row r="${excelRow}"([^>]*)>`);
+      if (rowRe.test(sheetXml)) {
+        sheetXml = sheetXml.replace(rowRe, (m, attrs) => {
+          const cleaned = attrs.replace(/\s*ht="[^"]*"/g, "").replace(/\s*customHeight="[^"]*"/g, "");
+          return `<row r="${excelRow}"${cleaned} ht="${htPt.toFixed(2)}" customHeight="1">`;
+        });
+      }
+    });
+    if (!anchors.length) return;
+
+    // 照片列适当加宽，别让缩略图挤在窄格子里看不清
+    const colNum = anchors[0].col + 1;
+    const colsXml = `<cols><col min="${colNum}" max="${colNum}" width="11" customWidth="1"/></cols>`;
+    if (!/<cols>/.test(sheetXml)) sheetXml = sheetXml.replace("<sheetData>", colsXml + "<sheetData>");
+
+    const drawingXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
+      anchors.map((a, i) => `<xdr:oneCellAnchor>` +
+        `<xdr:from><xdr:col>${a.col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${a.row}</xdr:row><xdr:rowOff>${a.rowOff}</xdr:rowOff></xdr:from>` +
+        `<xdr:ext cx="${THUMB * EMU}" cy="${THUMB * EMU}"/>` +
+        `<xdr:pic>` +
+        `<xdr:nvPicPr><xdr:cNvPr id="${i + 1}" name="img${i + 1}"/><xdr:cNvPicPr/></xdr:nvPicPr>` +
+        `<xdr:blipFill><a:blip r:embed="${a.rId}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>` +
+        `<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${THUMB * EMU}" cy="${THUMB * EMU}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>` +
+        `</xdr:pic><xdr:clientData/></xdr:oneCellAnchor>`).join("") +
+      `</xdr:wsDr>`;
+    const drawingRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      drawingRels.map(r => `<Relationship Id="${r.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${r.target}"/>`).join("") +
+      `</Relationships>`;
+
+    const drawingName = `drawing${sheetNum}.xml`;
+    zip.addFile(`xl/drawings/${drawingName}`, Buffer.from(drawingXml, "utf8"));
+    zip.addFile(`xl/drawings/_rels/${drawingName}.rels`, Buffer.from(drawingRelsXml, "utf8"));
+    drawingOverrides.push(`<Override PartName="/xl/drawings/${drawingName}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`);
+
+    const wsRelsPath = `xl/worksheets/_rels/sheet${sheetNum}.xml.rels`;
+    const existingWsRels = zip.getEntry(wsRelsPath);
+    let wsRelsXml = existingWsRels
+      ? existingWsRels.getData().toString("utf8")
+      : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
+    const usedIds = [...wsRelsXml.matchAll(/Id="rId(\d+)"/g)].map(m => Number(m[1]));
+    const drawRId = "rId" + (usedIds.length ? Math.max(...usedIds) + 1 : 1);
+    wsRelsXml = wsRelsXml.replace("</Relationships>",
+      `<Relationship Id="${drawRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/${drawingName}"/></Relationships>`);
+    zip.addFile(wsRelsPath, Buffer.from(wsRelsXml, "utf8"));
+
+    if (!/<drawing /.test(sheetXml)) sheetXml = sheetXml.replace("</worksheet>", `<drawing r:id="${drawRId}"/></worksheet>`);
+    zip.updateFile(sheetEntry, Buffer.from(sheetXml, "utf8"));
+  });
+
+  mediaList.forEach(m => zip.addFile(`xl/media/image${m.idx}.${m.ext}`, m.data));
+  if (drawingOverrides.length) {
+    let ctXml = zip.getEntry("[Content_Types].xml").getData().toString("utf8");
+    ctXml = ctXml.replace("</Types>", drawingOverrides.join("") + "</Types>");
+    zip.updateFile("[Content_Types].xml", Buffer.from(ctXml, "utf8"));
+  }
+  return zip.toBuffer();
+}
+
 /* ---------- 订单读写帮助 ---------- */
 function loadOrder(id) {
   const row = db.prepare("SELECT * FROM orders WHERE id = ?").get(id);
@@ -796,57 +911,75 @@ router.get("/export", A.adminRequired, (req, res) => {
   let orders = allOrdersPublic();
   if (seasonFilter) orders = orders.filter(o => o.season === seasonFilter);
   const styleOf = o => o.values.styleNo || o.values.styleName || o.id;
-  const photosText = arr => (arr || []).join("、");
   const timeText = t => t ? new Date(t).toLocaleString("zh-CN") : "";
+
+  // 导出时把真实图片嵌入表格（而不是"（有图）"文字或裸链接），这里边构建每张表的行边记录哪一行哪一列该嵌哪些图
+  const imagePlacements = [];
+  const trackImg = (sheetNum, rowIdx, colIdx, photos) => {
+    const arr = (Array.isArray(photos) ? photos : (photos ? [photos] : [])).filter(Boolean);
+    if (arr.length) imagePlacements.push({ sheet: sheetNum, row: rowIdx + 1, col: colIdx, urls: arr });
+  };
 
   // 表一：订单基本信息（与原有逻辑一致，仍是每个字段取最新一条打卡摘要）。
   // 货号(styleNo)已经作为固定的第二列(styleOf，带款式名/id兜底)单独放了，这里排除掉，避免表头重复出现两次"货号"
   const cols = [...fields.order, ...fields.production].filter(f => f.k !== "styleNo");
   const header1 = ["季节", "货号", ...cols.map(f => f.label)];
-  const rows1 = orders.map(o => [o.season, styleOf(o), ...cols.map(f => {
-    if (f.type === "log") {
-      const arr = (o.logs[f.k] || []).slice().sort((a, b) => b.t - a.t);
-      const l = arr[0];
-      return l ? `${l.text}（${l.byName} ${timeText(l.t)}）` : "";
-    }
-    if (f.type === "image") return o.values.img ? "（有图）" : "";
-    if (f.type === "user-sales" || f.type === "user-follower") return nameOf(o.values[f.k]);
-    const v = o.values[f.k];
-    return Array.isArray(v) ? v.join("、") : (v || "");
-  })]);
+  const imgColIdx = 2 + cols.findIndex(f => f.k === "img");
+  const rows1 = orders.map((o, i) => {
+    if (imgColIdx >= 2) trackImg(1, i, imgColIdx, o.values.img);
+    return [o.season, styleOf(o), ...cols.map(f => {
+      if (f.type === "log") {
+        const arr = (o.logs[f.k] || []).slice().sort((a, b) => b.t - a.t);
+        const l = arr[0];
+        return l ? `${l.text}（${l.byName} ${timeText(l.t)}）` : "";
+      }
+      if (f.type === "image") return ""; // 款式图是真的嵌进表格里，这一格文字留空
+      if (f.type === "user-sales" || f.type === "user-follower") return nameOf(o.values[f.k]);
+      const v = o.values[f.k];
+      return Array.isArray(v) ? v.join("、") : (v || "");
+    })];
+  });
 
   // 表二：生产进度（主厂 + 每个动态加工点 + 面料/绣印/产前样/裁剪/整烫/包装 的每一条打卡）
   const header2 = ["季节", "货号", "环节", "生产工序", "车工人数", "预计下车时间", "内容", "记录人", "时间", "照片"];
   const rows2 = [];
+  const photoCol2 = header2.length - 1;
   orders.forEach(o => {
-    (o.mainLog || []).forEach(e => rows2.push([o.season, styleOf(o), "主厂", e.process || "", e.workers || "", e.estDone || "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)]));
-    (o.subs || []).forEach(s => (s.log || []).forEach(e =>
-      rows2.push([o.season, styleOf(o), s.name, e.process || "", e.workers || "", e.estDone || "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
+    (o.mainLog || []).forEach(e => { trackImg(2, rows2.length, photoCol2, e.photos); rows2.push([o.season, styleOf(o), "主厂", e.process || "", e.workers || "", e.estDone || "", e.text || "", e.byName, timeText(e.t), ""]); });
+    (o.subs || []).forEach(s => (s.log || []).forEach(e => { trackImg(2, rows2.length, photoCol2, e.photos); rows2.push([o.season, styleOf(o), s.name, e.process || "", e.workers || "", e.estDone || "", e.text || "", e.byName, timeText(e.t), ""]); }));
     [...fields.order, ...fields.production].filter(f => f.type === "log").forEach(f =>
-      (o.logs[f.k] || []).forEach(e => rows2.push([o.season, styleOf(o), f.label, "", "", "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
+      (o.logs[f.k] || []).forEach(e => { trackImg(2, rows2.length, photoCol2, e.photos); rows2.push([o.season, styleOf(o), f.label, "", "", "", e.text || "", e.byName, timeText(e.t), ""]); }));
   });
 
   // 表三：验货问题（发现问题/整改情况/补充说明 各自独立一行方便查看）
   const header3 = ["季节", "货号", "发现问题", "发现人", "发现时间", "整改情况", "整改人", "整改时间", "补充说明", "照片"];
   const rows3 = [];
-  orders.forEach(o => (o.inspections || []).forEach(g => (g.items || []).forEach(it => rows3.push([
-    o.season, styleOf(o), it.problem || "", it.problemByName || "", timeText(it.problemAt),
-    it.fix || "（待整改）", it.fixByName || "", timeText(it.fixAt),
-    (it.notes || []).map(n => `${n.byName}：${n.text}`).join("；"), photosText(g.photos)
-  ]))));
+  const photoCol3 = header3.length - 1;
+  orders.forEach(o => (o.inspections || []).forEach(g => (g.items || []).forEach(it => {
+    trackImg(3, rows3.length, photoCol3, g.photos);
+    rows3.push([
+      o.season, styleOf(o), it.problem || "", it.problemByName || "", timeText(it.problemAt),
+      it.fix || "（待整改）", it.fixByName || "", timeText(it.fixAt),
+      (it.notes || []).map(n => `${n.byName}：${n.text}`).join("；"), ""
+    ]);
+  })));
 
   // 表四：跟单小结
   const header4 = ["季节", "货号", "记录人", "时间", "内容", "照片"];
   const rows4 = [];
-  orders.forEach(o => (o.followIssues || []).forEach(e =>
-    rows4.push([o.season, styleOf(o), e.byName, timeText(e.t), e.text || "", photosText(e.photos)])));
+  const photoCol4 = header4.length - 1;
+  orders.forEach(o => (o.followIssues || []).forEach(e => {
+    trackImg(4, rows4.length, photoCol4, e.photos);
+    rows4.push([o.season, styleOf(o), e.byName, timeText(e.t), e.text || "", ""]);
+  }));
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header1, ...rows1]), "订单基本信息");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header2, ...rows2]), "生产进度");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header3, ...rows3]), "验货问题");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header4, ...rows4]), "跟单小结");
-  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  let buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  try { buf = embedImagesIntoXlsx(buf, imagePlacements); } catch (e) { /* 嵌图失败就退回纯文字表格，不影响导出本身 */ }
   const fname = `订单导出-${seasonFilter || "全部季节"}-${new Date().toISOString().slice(0, 10)}.xlsx`;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(fname)}`);
