@@ -65,9 +65,10 @@ function fmtSize(n) {
   if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
   return (n / 1024 / 1024).toFixed(1) + " MB";
 }
-function toast(s) {
+function toast(s, sticky) {
   const m = $("msg"); m.textContent = s; m.classList.add("show");
-  clearTimeout(toast._t); toast._t = setTimeout(() => m.classList.remove("show"), 2400);
+  clearTimeout(toast._t);
+  if (!sticky) toast._t = setTimeout(() => m.classList.remove("show"), 2400);
 }
 const userById = id => state.users.find(u => u.id === id);
 const uname = id => (userById(id) || {}).name || "";
@@ -1434,15 +1435,21 @@ const A = {
     const f = input.files && input.files[0]; if (!f) return;
     A.syncFileName(input.id, f.name);
     const fd = new FormData(); fd.append("file", f);
-    toast("正在解析文件…");
+    const btn = input.nextElementSibling;
+    input.disabled = true; if (btn) btn.disabled = true;
+    // 大文件(比如带很多张原图的表格)光是上传就可能要几十秒，这条提示要一直留着直到有结果，
+    // 不能用会自动消失的普通 toast，不然上传还没传完提示就先没了，看起来像卡死
+    toast("正在上传并解析文件，请稍候…" + (f.size > 5 * 1024 * 1024 ? "（文件较大，可能需要一点时间，请勿重复选择）" : ""), true);
     try {
       const r = await fetch("/api/import/parse", {
         method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd });
       const j = await r.json(); if (!r.ok) throw j;
       importRaw = "";
       const gotImages = j.rowImages && Object.keys(j.rowImages).length;
+      toast("解析完成");
       A.showPreview(A.rowsToPreview(j.rows, j.rowImages), (j.encoding === "GBK" ? "（已按 GBK 编码读取）" : "") + (gotImages ? "，已自动识别表格里的款式图" : ""));
     } catch (e) { toast((e && e.error) || "文件解析失败"); }
+    finally { input.disabled = false; if (btn) btn.disabled = false; }
   },
   // 表头列名 -> 字段
   importMap() {

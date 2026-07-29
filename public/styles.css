@@ -145,6 +145,7 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .btn.danger{background:var(--bad);color:#fff}
 .btn.danger.ghost{background:var(--card-2);color:var(--bad)}
 .btn:disabled{opacity:.4}
+.file-btn:disabled{opacity:.4;cursor:not-allowed}
 .btn:focus-visible,.nav-btn:focus-visible,.tab:focus-visible{outline:2.5px solid var(--blue-2);outline-offset:2px}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 16px}
 
