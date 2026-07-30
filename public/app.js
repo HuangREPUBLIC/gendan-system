@@ -684,7 +684,7 @@ function mainSubAddBoxHtml(oid, key, placeholder) {
 }
 function logFieldHtml(o, f, list, addKey, canAdd) {
   return `<div class="logfield">
-    <div class="lf-head"><span>${esc(f.label)}</span><span class="cnt">${(list || []).length} 条</span>
+    <div class="lf-head"><span><span class="lf-dot"></span>${esc(f.label)}</span><span class="cnt">${(list || []).length} 条</span>
       ${canAdd ? `<button class="btn mini right" onclick="A.toggleAdd('${addKey}')">＋ 打卡</button>` : ""}</div>
     ${canAdd ? `<div class="addbox" id="add-${addKey}">
       <textarea class="in" id="txt-${addKey}" placeholder="填写当前进度情况，可详细描述…"></textarea>

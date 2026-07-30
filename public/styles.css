@@ -206,6 +206,7 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .prodgroup-title span{font-weight:600;font-size:15.5px}
 .logfield:last-child{border-bottom:0}
 .lf-head{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15.5px}
+.lf-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blue-2);margin-right:7px;vertical-align:middle}
 .lf-head .cnt{color:var(--ink-2);font-weight:400;font-size:13px}
 .right{margin-left:auto}
 .log{margin:8px 0 0;padding:0;list-style:none}
