@@ -1542,7 +1542,7 @@ const A = {
       // 网络慢的时候能快很多。只有浏览器不支持(比如很老的机型)或本地解析出问题时才退回原来的服务器解析
       if (ext === "xlsx" && window.DecompressionStream) {
         try {
-          if (!window.XLSX) { toast("正在加载解析组件…", true); await loadScriptOnce("/xlsx.mini.min.js"); }
+          if (!window.XLSX) { toast("正在准备中，请稍候…", true); await loadScriptOnce("/xlsx.mini.min.js"); }
           await A.importFileClientSide(f);
           return;
         } catch (e) { console.error("本地解析失败，退回服务器解析：", e); }
@@ -1576,18 +1576,27 @@ const A = {
     toast("正在识别表格里的图片…", true);
     const found = await extractEmbeddedImagesClient(buf);
     const rowImages = {};
-    const origRows = Object.keys(found);
-    for (let i = 0; i < origRows.length; i++) {
-      const filteredIdx = origToFiltered[origRows[i]];
-      if (filteredIdx === undefined) continue;
-      const img = found[origRows[i]];
-      if (img.data.length > 8 * 1024 * 1024) continue; // 跟平时拍照上传的单张图片大小上限保持一致
-      toast(`正在上传图片…（${i + 1}/${origRows.length}）`, true);
-      try {
-        const mime = img.ext === "png" ? "image/png" : img.ext === "gif" ? "image/gif" : "image/jpeg";
-        const url = await uploadOnePhoto(new Blob([img.data], { type: mime }));
-        if (url) rowImages[filteredIdx] = url;
-      } catch (e) { /* 单张图片传失败就跳过，不影响其它行的数据 */ }
+    // 图片一张张排队上传太慢(压缩+上传的时间会累加)，改成同时传几张(并发3张)，网络等待的时间能重叠起来
+    const entries = Object.keys(found)
+      .map(origRow => ({ filteredIdx: origToFiltered[origRow], img: found[origRow] }))
+      .filter(e => e.filteredIdx !== undefined && e.img.data.length <= 8 * 1024 * 1024); // 跟平时拍照上传的单张图片大小上限保持一致
+    if (entries.length) {
+      let done = 0;
+      toast(`正在上传图片…（0/${entries.length}）`, true);
+      let next = 0;
+      const worker = async () => {
+        while (next < entries.length) {
+          const { filteredIdx, img } = entries[next++];
+          try {
+            const mime = img.ext === "png" ? "image/png" : img.ext === "gif" ? "image/gif" : "image/jpeg";
+            const url = await uploadOnePhoto(new Blob([img.data], { type: mime }));
+            if (url) rowImages[filteredIdx] = url;
+          } catch (e) { /* 单张图片传失败就跳过，不影响其它行的数据 */ }
+          done++;
+          toast(`正在上传图片…（${done}/${entries.length}）`, true);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, entries.length) }, worker));
     }
     importRaw = "";
     toast("解析完成");
