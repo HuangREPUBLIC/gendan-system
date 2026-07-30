@@ -291,6 +291,105 @@ async function uploadOnePhoto(file) {
   const j = await r.json(); if (!r.ok) throw j;
   return j.url;
 }
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement("script");
+    s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error("组件加载失败"));
+    document.head.appendChild(s);
+  });
+}
+// 浏览器本地读 zip 包里的几个指定文件(只读，不装额外的库)：
+// 只支持 STORED(不压缩)和 DEFLATE(用浏览器原生 DecompressionStream 解压)，
+// 遇到不支持的情况直接跳过该文件，让调用方决定要不要退回服务端解析，绝不会让用户没感知地拿到错误结果
+async function zipReadEntries(buf, wantNames) {
+  const dv = new DataView(buf), bytes = new Uint8Array(buf);
+  let eocd = -1;
+  const back = Math.min(bytes.length, 65557); // EOCD固定22字节 + 最长65535字节注释
+  for (let i = bytes.length - 22; i >= bytes.length - back && i >= 0; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("不是有效的 zip/xlsx 文件");
+  const cdOffset = dv.getUint32(eocd + 16, true);
+  const cdEntryCount = dv.getUint16(eocd + 10, true);
+  const wantSet = new Set(wantNames);
+  const found = {};
+  let p = cdOffset;
+  for (let i = 0; i < cdEntryCount && Object.keys(found).length < wantSet.size; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true);
+    const compressedSize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const commentLen = dv.getUint16(p + 32, true);
+    const localOffset = dv.getUint32(p + 42, true);
+    const name = new TextDecoder("utf-8").decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    if (wantSet.has(name)) found[name] = { method, compressedSize, localOffset };
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  const result = {};
+  for (const name of Object.keys(found)) {
+    const { method, compressedSize, localOffset } = found[name];
+    // 本地文件头的文件名/extra长度不一定跟中央目录一致，要在本地头里重新读一次才能算出数据真正的起始位置
+    const lNameLen = dv.getUint16(localOffset + 26, true);
+    const lExtraLen = dv.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + lNameLen + lExtraLen;
+    const compressed = bytes.subarray(dataStart, dataStart + compressedSize);
+    if (method === 0) { result[name] = compressed; continue; }
+    if (method === 8) {
+      if (!window.DecompressionStream) continue;
+      const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      result[name] = new Uint8Array(await new Response(stream).arrayBuffer());
+      continue;
+    }
+    // 其它压缩方式(极少见)不支持，跳过这个文件
+  }
+  return result;
+}
+// 从 xlsx 里抠出直接贴的图片(比如款式图)，按锚定的行号(0-based，跟表头一起算)配对——
+// 浏览器本地版，逻辑跟服务端 extractEmbeddedImages 完全对应，解析失败就返回已抠到的部分，不影响正常的表格文字导入
+async function extractEmbeddedImagesClient(buf) {
+  const images = {};
+  try {
+    const step1 = await zipReadEntries(buf, ["xl/worksheets/_rels/sheet1.xml.rels"]);
+    const relsBytes = step1["xl/worksheets/_rels/sheet1.xml.rels"];
+    if (!relsBytes) return images;
+    const drawingRefM = new TextDecoder("utf-8").decode(relsBytes).match(/Target="[^"]*?(drawing\d*\.xml)"/);
+    if (!drawingRefM) return images;
+    const drawingName = drawingRefM[1];
+    const step2 = await zipReadEntries(buf, ["xl/drawings/" + drawingName, "xl/drawings/_rels/" + drawingName + ".rels"]);
+    const drawingBytes = step2["xl/drawings/" + drawingName];
+    if (!drawingBytes) return images;
+    const drawingXml = new TextDecoder("utf-8").decode(drawingBytes);
+    const rIdToMedia = {};
+    const drawingRelsBytes = step2["xl/drawings/_rels/" + drawingName + ".rels"];
+    if (drawingRelsBytes) {
+      const relsText = new TextDecoder("utf-8").decode(drawingRelsBytes);
+      const re = /<Relationship[^>]*Id="(rId\d+)"[^>]*Target="[^"]*?(media\/[^"]+)"/g;
+      let m; while ((m = re.exec(relsText))) rIdToMedia[m[1]] = "xl/" + m[2];
+    }
+    const anchorRe = /<xdr:(?:twoCellAnchor|oneCellAnchor)[\s\S]*?<\/xdr:(?:twoCellAnchor|oneCellAnchor)>/g;
+    const rowToMedia = {};
+    let am;
+    while ((am = anchorRe.exec(drawingXml))) {
+      const block = am[0];
+      const rowM = block.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/);
+      const embedM = block.match(/r:embed="(rId\d+)"/);
+      if (!rowM || !embedM) continue;
+      const mediaPath = rIdToMedia[embedM[1]];
+      if (mediaPath) rowToMedia[parseInt(rowM[1], 10)] = mediaPath;
+    }
+    const mediaNames = [...new Set(Object.values(rowToMedia))];
+    if (!mediaNames.length) return images;
+    const step3 = await zipReadEntries(buf, mediaNames);
+    Object.keys(rowToMedia).forEach(row => {
+      const data = step3[rowToMedia[row]];
+      if (!data) return;
+      images[row] = { data, ext: (rowToMedia[row].split(".").pop() || "png").toLowerCase() };
+    });
+  } catch (e) { /* 抠图失败就返回已抠到的部分(可能是空)，不影响正常的表格文字导入 */ }
+  return images;
+}
 // 缩略图（editable 时带删除叉）
 function photoThumbs(urls, editable, ctx) {
   return urls.map((u, i) => `<div class="ph-thumb">
@@ -1436,6 +1535,66 @@ const A = {
     A.syncFileName(input.id, f.name);
     const btn = input.nextElementSibling;
     input.disabled = true; if (btn) btn.disabled = true;
+    try {
+      const ext = (f.name.split(".").pop() || "").toLowerCase();
+      // .xlsx 优先走浏览器本地解析：表格文字和表格里贴的图片都在手机/电脑本地直接解出来，
+      // 图片会先在本地压缩(跟平时拍照上传一样)再传，不用把带原图、可能几十MB的整个文件传去服务器，
+      // 网络慢的时候能快很多。只有浏览器不支持(比如很老的机型)或本地解析出问题时才退回原来的服务器解析
+      if (ext === "xlsx" && window.DecompressionStream) {
+        try {
+          if (!window.XLSX) { toast("正在加载解析组件…", true); await loadScriptOnce("/xlsx.mini.min.js"); }
+          await A.importFileClientSide(f);
+          return;
+        } catch (e) { console.error("本地解析失败，退回服务器解析：", e); }
+      }
+      await A.importFileServerSide(f);
+    } finally { input.disabled = false; if (btn) btn.disabled = false; }
+  },
+  // 本地解析(浏览器直接读文件，不经过网络上传原始大文件)
+  async importFileClientSide(f) {
+    toast("正在本地解析文件…", true);
+    const buf = await f.arrayBuffer();
+    // XLSX.read 的 type:"array" 要求传字节数组(Uint8Array)，直接传原始 ArrayBuffer 会静默解析出空结果
+    const wb = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true, dateNF: "yyyy-mm-dd" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error("表格里没有内容");
+    // 跟服务端一样收紧实际数据范围：WPS 导出的表格声明的数据范围经常比实际数据大很多
+    let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+    Object.keys(ws).forEach(addr => {
+      if (addr[0] === "!") return;
+      const c = XLSX.utils.decode_cell(addr);
+      if (c.r < minR) minR = c.r; if (c.r > maxR) maxR = c.r;
+      if (c.c < minC) minC = c.c; if (c.c > maxC) maxC = c.c;
+    });
+    const rawRows = minR === Infinity ? [] :
+      XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", range: { s: { r: minR, c: minC }, e: { r: maxR, c: maxC } } })
+        .map(r => r.map(c => (c == null ? "" : String(c).trim())));
+    const rows = []; const origToFiltered = {};
+    rawRows.forEach((r, origIdx) => { if (r.some(c => c !== "")) { origToFiltered[origIdx] = rows.length; rows.push(r); } });
+    if (rows.length < 2) throw new Error("至少需要表头和一行数据");
+
+    toast("正在识别表格里的图片…", true);
+    const found = await extractEmbeddedImagesClient(buf);
+    const rowImages = {};
+    const origRows = Object.keys(found);
+    for (let i = 0; i < origRows.length; i++) {
+      const filteredIdx = origToFiltered[origRows[i]];
+      if (filteredIdx === undefined) continue;
+      const img = found[origRows[i]];
+      if (img.data.length > 8 * 1024 * 1024) continue; // 跟平时拍照上传的单张图片大小上限保持一致
+      toast(`正在上传图片…（${i + 1}/${origRows.length}）`, true);
+      try {
+        const mime = img.ext === "png" ? "image/png" : img.ext === "gif" ? "image/gif" : "image/jpeg";
+        const url = await uploadOnePhoto(new Blob([img.data], { type: mime }));
+        if (url) rowImages[filteredIdx] = url;
+      } catch (e) { /* 单张图片传失败就跳过，不影响其它行的数据 */ }
+    }
+    importRaw = "";
+    toast("解析完成");
+    A.showPreview(A.rowsToPreview(rows, rowImages), Object.keys(rowImages).length ? "，已自动识别表格里的款式图" : "");
+  },
+  // 服务器解析(原来的方式)：本地解析不支持或失败时的兜底
+  async importFileServerSide(f) {
     // 用 XHR 而不是 fetch，是因为要拿到真实上传进度、并能设超时——
     // 不然网络卡住时界面只会一直显示"请稍候"，用户分不清是真在传还是已经死了
     try {
@@ -1465,7 +1624,6 @@ const A = {
       toast("解析完成");
       A.showPreview(A.rowsToPreview(j.rows, j.rowImages), (j.encoding === "GBK" ? "（已按 GBK 编码读取）" : "") + (gotImages ? "，已自动识别表格里的款式图" : ""));
     } catch (e) { toast((e && e.error) || "文件解析失败"); }
-    finally { input.disabled = false; if (btn) btn.disabled = false; }
   },
   // 表头列名 -> 字段
   importMap() {
