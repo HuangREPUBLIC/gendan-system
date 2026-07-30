@@ -1,6 +1,5 @@
 const fs = require("fs");
 const { JSDOM, VirtualConsole } = require("jsdom");
-const AdmZip = require("adm-zip");
 // jsdom 未实现 window.scrollTo 等，属正常现象，静音掉避免干扰测试输出
 const vc = new VirtualConsole();
 vc.on("jsdomError", () => {});
@@ -9,66 +8,6 @@ const ROOT = require("path").join(__dirname, "..", "public");
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log("PASS " + n); } else { fail++; console.log("FAIL " + n); } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-// 构造一个合法的 xlsx(本质是zip)：表头+2行数据，第一行数据(0-based row=1)带一张嵌入图片，
-// 模拟 WPS/Excel 表格里直接贴款式图的场景，用来验证 /api/import/parse 能正确把图片按行抠出来
-function buildXlsxWithEmbeddedImage() {
-  const zip = new AdmZip();
-  zip.addFile("[Content_Types].xml", Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-<Default Extension="xml" ContentType="application/xml"/>
-<Default Extension="png" ContentType="image/png"/>
-<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>
-</Types>`));
-  zip.addFile("_rels/.rels", Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-</Relationships>`));
-  zip.addFile("xl/workbook.xml", Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
-</workbook>`));
-  zip.addFile("xl/_rels/workbook.xml.rels", Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-</Relationships>`));
-  zip.addFile("xl/worksheets/sheet1.xml", Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<sheetData>
-<row r="1"><c r="A1" t="inlineStr"><is><t>货号</t></is></c><c r="B1" t="inlineStr"><is><t>款式名</t></is></c></row>
-<row r="2"><c r="A2" t="inlineStr"><is><t>E2E-IMG1</t></is></c><c r="B2" t="inlineStr"><is><t>带图测试款</t></is></c></row>
-<row r="3"><c r="A3" t="inlineStr"><is><t>E2E-IMG2</t></is></c><c r="B3" t="inlineStr"><is><t>无图测试款</t></is></c></row>
-</sheetData>
-<drawing r:id="rId1"/>
-</worksheet>`));
-  zip.addFile("xl/worksheets/_rels/sheet1.xml.rels", Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>
-</Relationships>`));
-  zip.addFile("xl/drawings/drawing1.xml", Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<xdr:twoCellAnchor>
-<xdr:from><xdr:col>2</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>1</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
-<xdr:to><xdr:col>3</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
-<xdr:pic>
-<xdr:nvPicPr><xdr:cNvPr id="1" name="Picture 1"/><xdr:cNvPicPr/></xdr:nvPicPr>
-<xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>
-<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>
-</xdr:pic>
-<xdr:clientData/>
-</xdr:twoCellAnchor>
-</xdr:wsDr>`));
-  zip.addFile("xl/drawings/_rels/drawing1.xml.rels", Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
-</Relationships>`));
-  const png1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
-  zip.addFile("xl/media/image1.png", png1x1);
-  return zip.toBuffer();
-}
 
 (async () => {
   const html = fs.readFileSync(ROOT + "/index.html", "utf8");
@@ -186,26 +125,6 @@ function buildXlsxWithEmbeddedImage() {
   const orderX = st().orders.find(o => o.values.styleNo === "E2E-ORDER");
   ok(!!orderX && orderX.values.shipDate === "2026-09-10" && orderX.values.deadline === "2026-08-20", "确认导入后发货日期/订单交期都正确保存");
 
-  // 批量导入：WPS/Excel 表格里嵌入的款式图，能自动抠出来配对到对应行
-  window.go("new"); await sleep(200);
-  const xlsxBuf = buildXlsxWithEmbeddedImage();
-  const parseRes = await fetch(BASEU + "/api/import/parse", {
-    method: "POST", headers: { Authorization: "Bearer " + window.localStorage.getItem("daka_token") },
-    body: (() => { const fd = new FormData(); fd.append("file", new Blob([xlsxBuf]), "test.xlsx"); return fd; })()
-  });
-  const parseJson = await parseRes.json();
-  ok(parseRes.ok && parseJson.rowImages && parseJson.rowImages["1"], "服务端正确识别出嵌入图片并按行号配对(第1行，即带图那单)");
-  ok(!parseJson.rowImages["2"], "没贴图的那一行没有被错误配对上图片");
-  window.eval(`A.showPreview(A.rowsToPreview(${JSON.stringify(parseJson.rows)}, ${JSON.stringify(parseJson.rowImages)}))`);
-  await sleep(200);
-  ok(!!doc.getElementById("pe-imp0-img") && doc.getElementById("pe-imp0-img").querySelectorAll(".ph-thumb").length === 1,
-    "导入预览里带图的那单已经自动填好款式图缩略图");
-  await A.confirmImport(); await sleep(500);
-  const importedWithImg = st().orders.find(o => o.values.styleNo === "E2E-IMG1");
-  ok(!!importedWithImg && Array.isArray(importedWithImg.values.img) && importedWithImg.values.img.length === 1,
-    "确认导入后，订单确实带上了表格里嵌入的款式图");
-  const importedNoImg = st().orders.find(o => o.values.styleNo === "E2E-IMG2");
-  ok(!!importedNoImg && !(importedNoImg.values.img && importedNoImg.values.img.length), "没贴图的那单没有被错误地带上图片");
 
   // 权限：下厂员视角
   A.forceLogout(); await sleep(150);

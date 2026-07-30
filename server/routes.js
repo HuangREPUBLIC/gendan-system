@@ -17,56 +17,7 @@ const A = require("./auth");
 const router = express.Router();
 
 /**
- * 从 xlsx（本质是个 zip 包）里把嵌入的图片(比如 WPS/Excel 表格里直接贴的款式图)抠出来，
- * 按图片锚定的行号(0-based，跟表头一起算，跟 sheet_to_json 的行下标对得上)配对。
- * 只处理"第一个工作表 + 它关联的 drawing"这个最常见的场景；解析失败/找不到就静默返回空，
- * 不影响正常的表格文字数据导入——图片是锦上添花，不是必须的。
- */
-function extractEmbeddedImages(buf) {
-  const images = {}; // 0-based 行号 -> { data: Buffer, ext: string }
-  let zip;
-  try { zip = new AdmZip(buf); } catch (e) { return images; }
-  const entries = {}; zip.getEntries().forEach(e => { entries[e.entryName] = e; });
-
-  // 找第一个工作表(sheet1.xml)关联的 drawing 文件
-  const sheetRels = entries["xl/worksheets/_rels/sheet1.xml.rels"];
-  if (!sheetRels) return images;
-  const sheetRelsXml = sheetRels.getData().toString("utf8");
-  const drawingRefM = sheetRelsXml.match(/Target="[^"]*?(drawing\d*\.xml)"/);
-  if (!drawingRefM) return images;
-  const drawingEntry = entries["xl/drawings/" + drawingRefM[1]];
-  if (!drawingEntry) return images;
-  const drawingXml = drawingEntry.getData().toString("utf8");
-
-  // drawing 自己的关系文件：rId -> 图片在 xl/media 下的文件名
-  const drawingRelsEntry = entries["xl/drawings/_rels/" + drawingRefM[1] + ".rels"];
-  const rIdToMedia = {};
-  if (drawingRelsEntry) {
-    const relsXml = drawingRelsEntry.getData().toString("utf8");
-    const re = /<Relationship[^>]*Id="(rId\d+)"[^>]*Target="[^"]*?(media\/[^"]+)"/g;
-    let m;
-    while ((m = re.exec(relsXml))) rIdToMedia[m[1]] = "xl/" + m[2];
-  }
-
-  // 每个 <xdr:...Anchor> 块：起始行(from/row) + 引用的图片(r:embed)
-  const anchorRe = /<xdr:(?:twoCellAnchor|oneCellAnchor)[\s\S]*?<\/xdr:(?:twoCellAnchor|oneCellAnchor)>/g;
-  let am;
-  while ((am = anchorRe.exec(drawingXml))) {
-    const block = am[0];
-    const rowM = block.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/);
-    const embedM = block.match(/r:embed="(rId\d+)"/);
-    if (!rowM || !embedM) continue;
-    const mediaPath = rIdToMedia[embedM[1]];
-    const mediaEntry = mediaPath && entries[mediaPath];
-    if (!mediaEntry) continue;
-    const row = parseInt(rowM[1], 10);
-    images[row] = { data: mediaEntry.getData(), ext: (path.extname(mediaPath) || ".png").toLowerCase() };
-  }
-  return images;
-}
-
-/**
- * extractEmbeddedImages 的反向操作：把真实图片写进导出的 xlsx，而不是"（有图）"文字或裸链接。
+ * 把真实图片写进导出的 xlsx，而不是"（有图）"文字或裸链接。
  * placements: [{ sheet: 1起(对应 sheetN.xml 的顺序), row: 0-based(含表头行), col: 0-based, urls: ["/uploads/xxx.jpg", ...] }]
  * 每个 (sheet,row) 目前只会对应一个照片列（各分表"照片"都是固定的最后一列，或订单基本信息里"款式图"独占一列），
  * 同一格里多张照片纵向堆叠展示（不会挤占右边其他列的数据），找不到的图片文件直接跳过、不影响其余导出内容。
@@ -899,29 +850,10 @@ router.post("/import/parse", (req, res, next) => {
     ? XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", range: usedRange })
         .map(r => r.map(c => (c == null ? "" : String(c).trim())))
     : [];
-  // 过滤掉空行的同时，记一下"原始行号 -> 过滤后行号"的对应关系，
-  // 好让嵌入图片(按原始行号锚定)能对上过滤后、真正发给前端的那份 rows 的下标
-  const rows = []; const origToFiltered = {};
-  rawRows.forEach((r, origIdx) => { if (r.some(c => c !== "")) { origToFiltered[origIdx] = rows.length; rows.push(r); } });
+  const rows = rawRows.filter(r => r.some(c => c !== ""));
   if (rows.length < 2) return res.status(400).json({ error: "至少需要表头和一行数据" });
 
-  // WPS/Excel 表格里直接贴的图片(比如款式图)：尝试抠出来，按行号配对，失败也不影响文字数据导入
-  const rowImages = {};
-  if (ext === ".xlsx") {
-    try {
-      const found = extractEmbeddedImages(req.file.buffer);
-      Object.keys(found).forEach(origRow => {
-        const filteredIdx = origToFiltered[origRow];
-        if (filteredIdx === undefined) return;
-        const img = found[origRow];
-        if (img.data.length > 8 * 1024 * 1024) return; // 跟 /api/upload 的单张图片大小上限保持一致
-        const fname = uid() + (img.ext || ".png");
-        fs.writeFileSync(path.join(UPLOAD_DIR, fname), img.data);
-        rowImages[filteredIdx] = "/uploads/" + fname;
-      });
-    } catch (e) { /* 图片抠取失败就算了，不影响正常的表格文字导入 */ }
-  }
-  res.json({ rows, sheet: wb.SheetNames[0], encoding, rowImages });
+  res.json({ rows, sheet: wb.SheetNames[0], encoding });
 });
 
 /* ---------- 导出 Excel（管理员）：订单基本信息 + 生产进度 + 验货问题 + 跟单小结，可按季节筛选 ---------- */
