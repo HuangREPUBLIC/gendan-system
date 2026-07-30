@@ -1434,16 +1434,32 @@ const A = {
   async importFile(input) {
     const f = input.files && input.files[0]; if (!f) return;
     A.syncFileName(input.id, f.name);
-    const fd = new FormData(); fd.append("file", f);
     const btn = input.nextElementSibling;
     input.disabled = true; if (btn) btn.disabled = true;
-    // 大文件(比如带很多张原图的表格)光是上传就可能要几十秒，这条提示要一直留着直到有结果，
-    // 不能用会自动消失的普通 toast，不然上传还没传完提示就先没了，看起来像卡死
-    toast("正在上传并解析文件，请稍候…" + (f.size > 5 * 1024 * 1024 ? "（文件较大，可能需要一点时间，请勿重复选择）" : ""), true);
+    // 用 XHR 而不是 fetch，是因为要拿到真实上传进度、并能设超时——
+    // 不然网络卡住时界面只会一直显示"请稍候"，用户分不清是真在传还是已经死了
     try {
-      const r = await fetch("/api/import/parse", {
-        method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd });
-      const j = await r.json(); if (!r.ok) throw j;
+      const j = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/import/parse");
+        xhr.setRequestHeader("Authorization", "Bearer " + state.token);
+        xhr.timeout = 180000; // 3分钟，超过多半是网络问题，不能让用户无限期干等
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && e.total) {
+            const pct = Math.round(e.loaded / e.total * 100);
+            toast(pct < 100 ? `正在上传文件… ${pct}%` : "上传完成，正在解析…", true);
+          } else toast("正在上传文件，请稍候…", true);
+        };
+        xhr.onload = () => {
+          let j2 = null; try { j2 = JSON.parse(xhr.responseText); } catch (e) {}
+          if (xhr.status >= 200 && xhr.status < 300 && j2) resolve(j2);
+          else reject((j2 && j2.error) ? j2 : { error: "文件解析失败(状态码 " + xhr.status + ")" });
+        };
+        xhr.onerror = () => reject({ error: "网络出错，上传失败，请检查网络后重试" });
+        xhr.ontimeout = () => reject({ error: "上传超过3分钟没有完成，可能是网络太慢或文件太大/太复杂，请换个网络环境后重试" });
+        const fd = new FormData(); fd.append("file", f);
+        xhr.send(fd);
+      });
       importRaw = "";
       const gotImages = j.rowImages && Object.keys(j.rowImages).length;
       toast("解析完成");

@@ -162,6 +162,32 @@ async function call(method, path, token, body) {
   const drawing2Xml = zip2.getEntry("xl/drawings/drawing2.xml").getData().toString("utf8");
   ok(drawing2Xml.includes(`<xdr:row>${logRowIdx}</xdr:row>`), "打卡照片图片锚定在测试打卡所在的正确行");
 
+  // ---- 导入解析：WPS 导出的表格 !ref(声明的数据范围) 经常比实际数据大很多(最坏到 100 多万行)，
+  // 之前会照着声明的范围去读，哪怕实际只有两三行数据，也要同步遍历上百万个空单元格，实测能卡住服务器 20+ 秒。
+  // 现在改成按实际有数据的单元格收紧范围，这里验证：哪怕文件自己声明了一个夸张的大范围，解析也应该又快又准 ----
+  const bigRangeWs = XLSX.utils.aoa_to_sheet([["货号", "款式名"], ["WPSBIG-1", "夸张范围测试款"], ["WPSBIG-2", "夸张范围测试款2"]]);
+  bigRangeWs["!ref"] = "A1:AZ1048576"; // 模拟 WPS 留下的夸张 !ref，实际只有 3 行数据
+  const bigRangeWb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(bigRangeWb, bigRangeWs, "Sheet1");
+  const bigRangeBuf = XLSX.write(bigRangeWb, { type: "buffer", bookType: "xlsx" });
+  // Node fetch(undici) 在这个测试文件跑到第60多个请求时，偶尔会复用一个已经失效的 keep-alive 连接导致 EPIPE，
+  // 跟服务端逻辑无关(同样的请求用 curl/全新连接怎么测都是秒回、结果正确)，这里失败重试一次规避这个客户端连接池问题
+  const tBig0 = Date.now();
+  let bigRes;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fdBig = new FormData();
+      fdBig.append("file", new Blob([bigRangeBuf]), "big-range.xlsx");
+      bigRes = await fetch(BASE + "/import/parse", { method: "POST", headers: { Authorization: "Bearer " + aT }, body: fdBig });
+      break;
+    } catch (e) { if (attempt === 1) throw e; }
+  }
+  const bigJ = await bigRes.json();
+  const bigElapsed = Date.now() - tBig0;
+  ok(bigRes.status === 200, "!ref 声明范围夸张的表格也能正常解析");
+  ok(bigJ.rows && bigJ.rows.length === 3, "解析结果只有实际的3行数据，没有把上百万空行也读进来(表头+2行)");
+  ok(bigElapsed < 5000, `!ref 夸张的表格解析耗时应该在几毫秒到几百毫秒级别，不应该卡住几十秒(实际耗时 ${bigElapsed}ms)`);
+
   // no-token blocked
   ok((await call("GET", "/bootstrap", null)).status === 401, "未登录被拦截");
   // 安全：公网"凭手机号自助改密"已移除（原来可盗号）

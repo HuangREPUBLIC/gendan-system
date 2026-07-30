@@ -171,7 +171,13 @@ function embedImagesIntoXlsx(buf, placements) {
     zip.updateFile(sheetEntry, Buffer.from(sheetXml, "utf8"));
   });
 
-  mediaList.forEach(m => zip.addFile(`xl/media/image${m.idx}.${m.ext}`, m.data));
+  // 图片(jpg/png等)本身已经是压缩过的格式，zip 再用 DEFLATE 压一遍基本没有效果、只是白白耗 CPU，
+  // 尤其是照片一多，重新打包这一步会明显变慢；这里改成 STORED(不压缩)存，文件体积几乎不变但快很多
+  mediaList.forEach(m => {
+    const name = `xl/media/image${m.idx}.${m.ext}`;
+    zip.addFile(name, m.data);
+    zip.getEntry(name).header.method = 0;
+  });
   if (drawingOverrides.length) {
     let ctXml = zip.getEntry("[Content_Types].xml").getData().toString("utf8");
     ctXml = ctXml.replace("</Types>", drawingOverrides.join("") + "</Types>");
@@ -875,8 +881,24 @@ router.post("/import/parse", (req, res, next) => {
 
   const ws = wb.Sheets[wb.SheetNames[0]];
   if (!ws) return res.status(400).json({ error: "表格里没有内容" });
-  const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" })
-    .map(r => r.map(c => (c == null ? "" : String(c).trim())));
+  // WPS 导出的表格经常把 !ref(声明的数据范围) 留得比实际数据大很多(比如曾经格式化过一大片区域后又删掉内容，
+  // 范围没跟着缩回去)，最坏情况能到 100 多万行；如果照着声明的范围去读，哪怕实际只有两三行数据，
+  // 也要在内存里遍历上百万个空单元格，实测能卡住服务器 20+ 秒(而且是同步阻塞，卡住的是所有人，不只是这一个请求)。
+  // 这里改成先找出真正有数据的单元格，收紧成实际范围再读，不再迷信文件自己声明的 !ref。
+  const usedRange = (() => {
+    let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+    Object.keys(ws).forEach(addr => {
+      if (addr[0] === "!") return;
+      const c = XLSX.utils.decode_cell(addr);
+      if (c.r < minR) minR = c.r; if (c.r > maxR) maxR = c.r;
+      if (c.c < minC) minC = c.c; if (c.c > maxC) maxC = c.c;
+    });
+    return minR === Infinity ? null : { s: { r: minR, c: minC }, e: { r: maxR, c: maxC } };
+  })();
+  const rawRows = usedRange
+    ? XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", range: usedRange })
+        .map(r => r.map(c => (c == null ? "" : String(c).trim())))
+    : [];
   // 过滤掉空行的同时，记一下"原始行号 -> 过滤后行号"的对应关系，
   // 好让嵌入图片(按原始行号锚定)能对上过滤后、真正发给前端的那份 rows 的下标
   const rows = []; const origToFiltered = {};
