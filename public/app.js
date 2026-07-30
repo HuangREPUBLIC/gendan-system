@@ -291,6 +291,14 @@ async function uploadOnePhoto(file) {
   const j = await r.json(); if (!r.ok) throw j;
   return j.url;
 }
+function loadScriptOnce(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement("script");
+    s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error("组件加载失败"));
+    document.head.appendChild(s);
+  });
+}
 // 缩略图（editable 时带删除叉）
 function photoThumbs(urls, editable, ctx) {
   return urls.map((u, i) => `<div class="ph-thumb">
@@ -1435,6 +1443,47 @@ const A = {
     A.syncFileName(input.id, f.name);
     const btn = input.nextElementSibling;
     input.disabled = true; if (btn) btn.disabled = true;
+    try {
+      const ext = (f.name.split(".").pop() || "").toLowerCase();
+      // .xlsx 直接在浏览器本地把文字解析出来，不用把整份文件（哪怕表格里贴了很多没压缩的原图，
+      // 几十MB）传去服务器——反正只要文字，不处理里面的图片，本地解析完全不用等上传
+      if (ext === "xlsx") {
+        try {
+          if (!window.XLSX) { toast("正在准备中，请稍候…", true); await loadScriptOnce("/xlsx.mini.min.js"); }
+          await A.importFileClientSide(f);
+          return;
+        } catch (e) { console.error("本地解析失败，退回服务器解析：", e); }
+      }
+      await A.importFileServerFallback(f);
+    } finally { input.disabled = false; if (btn) btn.disabled = false; }
+  },
+  // 本地解析：只读表格文字，不涉及图片，SheetJS 自己处理 zip/压缩，不需要额外的解压逻辑
+  async importFileClientSide(f) {
+    toast("正在本地解析文件…", true);
+    const buf = await f.arrayBuffer();
+    // XLSX.read 的 type:"array" 要求传字节数组(Uint8Array)，直接传原始 ArrayBuffer 会静默解析出空结果
+    const wb = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true, dateNF: "yyyy-mm-dd" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error("表格里没有内容");
+    // WPS 导出的表格声明的数据范围经常比实际数据大很多，收紧成实际有数据的范围再读
+    let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
+    Object.keys(ws).forEach(addr => {
+      if (addr[0] === "!") return;
+      const c = XLSX.utils.decode_cell(addr);
+      if (c.r < minR) minR = c.r; if (c.r > maxR) maxR = c.r;
+      if (c.c < minC) minC = c.c; if (c.c > maxC) maxC = c.c;
+    });
+    const rawRows = minR === Infinity ? [] :
+      XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", range: { s: { r: minR, c: minC }, e: { r: maxR, c: maxC } } })
+        .map(r => r.map(c => (c == null ? "" : String(c).trim())));
+    const rows = rawRows.filter(r => r.some(c => c !== ""));
+    if (rows.length < 2) throw new Error("至少需要表头和一行数据");
+    importRaw = "";
+    toast("解析完成");
+    A.showPreview(A.rowsToPreview(rows));
+  },
+  // 服务器解析：本地不支持(比如很老的机型加载不了解析组件)或本地解析出问题时的兜底
+  async importFileServerFallback(f) {
     // 用 XHR 而不是 fetch，是因为要拿到真实上传进度、并能设超时——
     // 不然网络卡住时界面只会一直显示"请稍候"，用户分不清是真在传还是已经死了
     try {
@@ -1463,7 +1512,6 @@ const A = {
       toast("解析完成");
       A.showPreview(A.rowsToPreview(j.rows), j.encoding === "GBK" ? "（已按 GBK 编码读取）" : "");
     } catch (e) { toast((e && e.error) || "文件解析失败"); }
-    finally { input.disabled = false; if (btn) btn.disabled = false; }
   },
   // 表头列名 -> 字段
   importMap() {
