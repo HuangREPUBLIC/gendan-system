@@ -685,7 +685,7 @@ function vDetail() {
     <div class="card">${kv(topProdScalars)}</div>
     <div class="card" style="margin-top:14px">
       ${logsOf("production").filter(f => ["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog)).join("")}
-      <div class="prodgroup-title"><span>生产进度</span></div>
+      <div class="prodgroup-title"><span><span class="lf-dot"></span>生产进度</span></div>
       <div class="logfield" style="padding-top:0">
         <div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
           <div class="lf-head" style="font-size:14.5px"><span>本厂</span>
