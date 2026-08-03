@@ -782,11 +782,13 @@ function vDetail() {
   // 订单交期/发货日期这两个字段单独摘出来，有编辑权限时直接在详情页点选就改，不用进编辑页；
   // 其它日期类字段(比如预计下车时间)是普通字段，跟着所属的分组(服装工厂旁边)走正常编辑流程
   const isQuickDateField = f => f.k === "deadline" || f.k === "shipDate";
-  const kv = fs => fs.map(f => isQuickDateField(f) && canB
+  const kv = fs => fs.map(f => (isQuickDateField(f) && canB
     ? `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
         <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
     : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
-        <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`).join("");
+        <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`) +
+    (f.k === "shipDate" && shipLocked(o) ? `<div style="padding:0 16px 10px;color:var(--bad);font-weight:700;font-size:12.5px">⚠️ 发货日期一经勾选，所有内容无法更改！！！</div>` : "")
+  ).join("");
   // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
   const editForm = s => `<div class="grid2">${scalars(s).filter(f => !isQuickDateField(f)).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
   const photos = normalizePhotos(o.values.img);
@@ -806,10 +808,6 @@ function vDetail() {
       </div>
       ${headerThumb}
     </div></div></section>
-
-  ${shipLocked(o) ? `<section class="group"><div class="card" style="background:var(--bad-soft);padding:12px 16px">
-    <div style="color:var(--bad);font-weight:700;font-size:13.5px">⚠️ 发货日期一经勾选，所有内容无法更改！！！${isAdmin() ? "（管理员仍可修改）" : ""}</div>
-  </div></section>` : ""}
 
   <section class="group">
     <div class="group-title"><span class="cat-title">一、订单明细</span>${canB ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}</div>
