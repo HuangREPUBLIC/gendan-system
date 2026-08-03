@@ -132,9 +132,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   doc.getElementById("lg-pass").value = "123456";
   await A.login(); A.dismissWelcome(); await sleep(400);
   ok(!app().includes('data-tab="admin"'), "下厂员看不到管理 Tab");
-  ok(app().includes("go('new')"), "权限统一后，下厂员也能看到新建订单入口");
-  window.go("detail", o1.id); await sleep(250); // o1 归王建国
-  ok(app().includes("txt-cutting"), "权限统一后，下厂员在别人订单上也有打卡框");
+  ok(app().includes("go('new')"), "任意登录用户都能看到新建订单入口");
+  window.go("detail", o1.id); await sleep(250); // o1 归王建国，跟刘敏(o2 下厂员)无关
+  ok(!app().includes("txt-cutting"), "谁负责的内容谁有权限：跟本单无关的下厂员看不到打卡框");
 
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);

@@ -24,23 +24,27 @@ async function call(method, path, token, body) {
   const wang = users.find(u => u.name === "王建国"), liu = users.find(u => u.name === "刘敏"), chen = users.find(u => u.name === "陈晓芳");
 
   // sales / follower login
-  const sT = (await call("POST", "/login", null, { phone: "13811112222", password: "123456" })).j.token; // 陈晓芳
-  const fT = (await call("POST", "/login", null, { phone: "13877778888", password: "123456" })).j.token; // 刘敏(负责 o2)
+  const sT = (await call("POST", "/login", null, { phone: "13811112222", password: "123456" })).j.token; // 陈晓芳(o1 业务员)
+  const wT = (await call("POST", "/login", null, { phone: "13855556666", password: "123456" })).j.token; // 王建国(o1 下厂员)
+  const fT = (await call("POST", "/login", null, { phone: "13877778888", password: "123456" })).j.token; // 刘敏(负责 o2，跟 o1 无关)
 
-  // 权限统一：下厂员现在也能在别人负责的订单上打卡
-  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "cutting", text: "非本单下厂员打卡" })).status === 200, "权限统一后，下厂员也能在别人订单打卡");
+  // 谁负责的内容谁有权限：跟 o1 无关的下厂员不能在 o1 上打卡
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "cutting", text: "非本单下厂员打卡" })).status === 403, "跟本单无关的下厂员不能在此订单打卡");
+  // 本单负责下厂员(王建国)能打卡
+  ok((await call("POST", `/orders/${o1.id}/logs`, wT, { key: "cutting", text: "本单下厂员打卡" })).status === 200, "本单负责下厂员能打卡");
   // admin can log
   const al = await call("POST", `/orders/${o1.id}/logs`, aT, { key: "cutting", text: "管理员打卡测试" });
   ok(al.status === 200 && al.j.logs.cutting.some(e => e.text === "管理员打卡测试" && e.byName === "老板"), "管理员打卡并自动记名");
   // sales(陈晓芳 创建 o1) can update both order-section and production-section progress on 自己的订单
   ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "fabricProg", text: "业务员更新面料" })).status === 200, "业务员更新订单明细进度");
   ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "ironing", text: "业务员也能打卡" })).status === 200, "本单业务员也能在生产明细打卡");
-  // sales edit basic ok; follower cannot
+  // sales edit basic ok; 跟本单无关的下厂员不行
   ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { fabric: "改过的面料" } })).status === 200, "业务员改自己订单基本信息");
-  ok((await call("PATCH", `/orders/${o1.id}`, fT, { values: { fabric: "x" } })).status === 200, "权限统一后，下厂员也能改基本信息");
+  ok((await call("PATCH", `/orders/${o1.id}`, fT, { values: { fabric: "x" } })).status === 403, "跟本单无关的下厂员不能改基本信息");
+  ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { fabric: "王建国改的面料" } })).status === 200, "本单负责下厂员能改基本信息");
 
-  // create order: 权限统一后 follower 也能建单
-  ok((await call("POST", "/orders", fT, { season: "SS2027", values: { styleNo: "X" } })).status === 200, "权限统一后，下厂员也能建单");
+  // create order: 任意登录用户仍可建单(建单后自己就是负责人)
+  ok((await call("POST", "/orders", fT, { season: "SS2027", values: { styleNo: "X" } })).status === 200, "下厂员能建单");
   const co = await call("POST", "/orders", sT, { season: "SS2027", values: { styleNo: "NEW-1", styleName: "新单" } });
   ok(co.status === 200 && co.j.values.sales === chen.id, "业务员建单并自动带上自己");
 
@@ -170,23 +174,47 @@ async function call(method, path, token, body) {
   const bigRangeWb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(bigRangeWb, bigRangeWs, "Sheet1");
   const bigRangeBuf = XLSX.write(bigRangeWb, { type: "buffer", bookType: "xlsx" });
-  // Node fetch(undici) 在这个测试文件跑到第60多个请求时，偶尔会复用一个已经失效的 keep-alive 连接导致 EPIPE，
-  // 跟服务端逻辑无关(同样的请求用 curl/全新连接怎么测都是秒回、结果正确)，这里失败重试一次规避这个客户端连接池问题
+  // Node fetch(undici) 在这个测试文件跑到第60多个请求时，偶尔会复用一个已经失效的 keep-alive 连接导致 EPIPE/ECONNRESET，
+  // 跟服务端逻辑无关(同样的请求用 curl/全新连接怎么测都是秒回、结果正确)，这里多重试几次、间隔一下再试，规避这个客户端连接池问题
   const tBig0 = Date.now();
   let bigRes;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     try {
       const fdBig = new FormData();
       fdBig.append("file", new Blob([bigRangeBuf]), "big-range.xlsx");
       bigRes = await fetch(BASE + "/import/parse", { method: "POST", headers: { Authorization: "Bearer " + aT }, body: fdBig });
       break;
-    } catch (e) { if (attempt === 1) throw e; }
+    } catch (e) {
+      if (attempt === 3) throw e;
+      await new Promise(r => setTimeout(r, 200));
+    }
   }
   const bigJ = await bigRes.json();
   const bigElapsed = Date.now() - tBig0;
   ok(bigRes.status === 200, "!ref 声明范围夸张的表格也能正常解析");
   ok(bigJ.rows && bigJ.rows.length === 3, "解析结果只有实际的3行数据，没有把上百万空行也读进来(表头+2行)");
   ok(bigElapsed < 5000, `!ref 夸张的表格解析耗时应该在几毫秒到几百毫秒级别，不应该卡住几十秒(实际耗时 ${bigElapsed}ms)`);
+
+  // ---- 完全权限开关：职位管理里勾上后不受"谁负责的内容谁有权限"限制 ----
+  const newRole = await call("POST", "/roles", aT, { label: "测试主管", template: "sales" });
+  ok(newRole.status === 200, "创建新职位成功");
+  const newRoleK = newRole.j.find(r => r.label === "测试主管").k;
+  await call("PATCH", `/users/${liu.id}`, aT, { role: newRoleK }); // 刘敏(fT)临时改成这个新职位
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "cutting", text: "还没开完全权限" })).status === 403,
+    "还没打开完全权限开关前，「测试主管」还是只能管自己负责的订单");
+  ok((await call("PATCH", `/roles/${newRoleK}`, aT, { fullAccess: true })).status === 200, "管理员打开「测试主管」的完全权限开关");
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "cutting", text: "完全权限打卡" })).status === 200,
+    "打开完全权限开关后，「测试主管」能管理任何订单(不受负责人限制)");
+
+  // ---- 发货日期锁定：一旦填写，除管理员外任何人(包括完全权限职位)都不能再改这单任何内容 ----
+  const lockOrder = await call("POST", "/orders", sT, { season: "SS2027", values: { styleNo: "LOCK-1", styleName: "锁定测试" } });
+  ok(lockOrder.status === 200, "创建锁定测试订单");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-01" } })).status === 200, "业务员本人可以填发货日期");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { fabric: "锁定后想改" } })).status === 403, "发货日期填写后，本单业务员自己也不能再改了");
+  ok((await call("POST", `/orders/${lockOrder.j.id}/logs`, fT, { key: "cutting", text: "完全权限也改不了" })).status === 403, "发货日期填写后，完全权限职位也不能再改这单");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { fabric: "管理员改的" } })).status === 200, "管理员仍能修改已锁定的订单");
+  await call("PATCH", `/users/${liu.id}`, aT, { role: "follower" }); // 测试收尾，把刘敏职位改回去
+  await call("DELETE", `/roles/${newRoleK}`, aT); // 清理掉测试用的临时职位，避免影响其它测试文件对职位数量的断言(同一个 npm test 进程里所有测试文件共用一个服务端/数据库)
 
   // no-token blocked
   ok((await call("GET", "/bootstrap", null)).status === 401, "未登录被拦截");
@@ -195,4 +223,4 @@ async function call(method, path, token, body) {
 
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);
-})();
+})().catch(e => { console.error("ERROR", e); process.exit(1); });

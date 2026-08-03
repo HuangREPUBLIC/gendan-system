@@ -141,11 +141,41 @@ async function run(fn, okMsg) {
 }
 
 /* ================= 权限（仅用于显示控制） ================= */
-function canEditBasic(o) { return !!me(); }
-function canAddLog(o, section) { return !!me(); }
-const canTouchEntry = e => !!me();
-const canWriteInspProblem = () => !!me();
-const canWriteInspFix = o => !!me();
+// 谁负责的内容谁有权限：本单业务员/下厂员/创建人可以添加删除这单的内容；
+// 职位在「职位管理」里勾了"完全权限"的(以及管理员)不受负责人限制；
+// 发货日期一旦填写，除管理员外任何人都不能再改这单任何内容
+function hasFullAccess() {
+  const u = me(); if (!u) return false;
+  if (u.role === "admin") return true;
+  const r = (state.roles || []).find(x => x.k === u.role);
+  return !!(r && r.fullAccess);
+}
+function isResponsible(o) {
+  const u = me(); if (!u || !o) return false;
+  const v = o.values || {};
+  return v.sales === u.id || v.follower === u.id || o.createdBy === u.id;
+}
+function shipLocked(o) { return !!(o && o.values && o.values.shipDate); }
+function canEditBasic(o) {
+  if (!me()) return false;
+  if (isAdmin()) return true;
+  if (shipLocked(o)) return false;
+  return hasFullAccess() || isResponsible(o);
+}
+function canAddLog(o, section) {
+  if (!me()) return false;
+  if (isAdmin()) return true;
+  if (shipLocked(o)) return false;
+  return hasFullAccess() || isResponsible(o);
+}
+const canTouchEntry = (o, e) => {
+  if (!me()) return false;
+  if (isAdmin()) return true;
+  if (shipLocked(o)) return false;
+  return hasFullAccess() || isResponsible(o) || (e && e.by === me().id);
+};
+const canWriteInspProblem = (o) => canAddLog(o);
+const canWriteInspFix = (o) => canAddLog(o);
 
 /* ================= 字段与下拉 ================= */
 function optionsFor(f) {
@@ -308,6 +338,96 @@ function loadScriptOnce(src) {
     s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error("组件加载失败"));
     document.head.appendChild(s);
   });
+}
+// 浏览器本地读 zip 包里的几个指定文件(只读，不装额外的库)：
+// 只支持 STORED(不压缩)和 DEFLATE(用浏览器原生 DecompressionStream 解压)，
+// 遇到不支持的情况直接跳过该文件，让调用方决定要不要退回服务端解析，绝不会让用户没感知地拿到错误结果
+async function zipReadEntries(buf, wantNames) {
+  const dv = new DataView(buf), bytes = new Uint8Array(buf);
+  let eocd = -1;
+  const back = Math.min(bytes.length, 65557); // EOCD固定22字节 + 最长65535字节注释
+  for (let i = bytes.length - 22; i >= bytes.length - back && i >= 0; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("不是有效的 zip/xlsx 文件");
+  const cdOffset = dv.getUint32(eocd + 16, true);
+  const cdEntryCount = dv.getUint16(eocd + 10, true);
+  const wantSet = new Set(wantNames);
+  const found = {};
+  let p = cdOffset;
+  for (let i = 0; i < cdEntryCount && Object.keys(found).length < wantSet.size; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true);
+    const compressedSize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const commentLen = dv.getUint16(p + 32, true);
+    const localOffset = dv.getUint32(p + 42, true);
+    const name = new TextDecoder("utf-8").decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    if (wantSet.has(name)) found[name] = { method, compressedSize, localOffset };
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  const result = {};
+  for (const name of Object.keys(found)) {
+    const { method, compressedSize, localOffset } = found[name];
+    const lNameLen = dv.getUint16(localOffset + 26, true);
+    const lExtraLen = dv.getUint16(localOffset + 28, true);
+    const dataStart = localOffset + 30 + lNameLen + lExtraLen;
+    const compressed = bytes.subarray(dataStart, dataStart + compressedSize);
+    if (method === 0) { result[name] = compressed; continue; }
+    if (method === 8) {
+      if (!window.DecompressionStream) continue;
+      const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      result[name] = new Uint8Array(await new Response(stream).arrayBuffer());
+      continue;
+    }
+    // 其它压缩方式(极少见)不支持，跳过这个文件
+  }
+  return result;
+}
+// 从 xlsx 里抠出直接贴的图片(比如款式图)，按锚定的行号(0-based，跟表头一起算)配对——
+// 浏览器本地版，逻辑跟服务端 extractEmbeddedImages 完全对应，解析失败就返回已抠到的部分，不影响正常的表格文字导入
+async function extractEmbeddedImagesClient(buf) {
+  const images = {};
+  try {
+    const step1 = await zipReadEntries(buf, ["xl/worksheets/_rels/sheet1.xml.rels"]);
+    const relsBytes = step1["xl/worksheets/_rels/sheet1.xml.rels"];
+    if (!relsBytes) return images;
+    const drawingRefM = new TextDecoder("utf-8").decode(relsBytes).match(/Target="[^"]*?(drawing\d*\.xml)"/);
+    if (!drawingRefM) return images;
+    const drawingName = drawingRefM[1];
+    const step2 = await zipReadEntries(buf, ["xl/drawings/" + drawingName, "xl/drawings/_rels/" + drawingName + ".rels"]);
+    const drawingBytes = step2["xl/drawings/" + drawingName];
+    if (!drawingBytes) return images;
+    const drawingXml = new TextDecoder("utf-8").decode(drawingBytes);
+    const rIdToMedia = {};
+    const drawingRelsBytes = step2["xl/drawings/_rels/" + drawingName + ".rels"];
+    if (drawingRelsBytes) {
+      const relsText = new TextDecoder("utf-8").decode(drawingRelsBytes);
+      const re = /<Relationship[^>]*Id="(rId\d+)"[^>]*Target="[^"]*?(media\/[^"]+)"/g;
+      let m; while ((m = re.exec(relsText))) rIdToMedia[m[1]] = "xl/" + m[2];
+    }
+    const anchorRe = /<xdr:(?:twoCellAnchor|oneCellAnchor)[\s\S]*?<\/xdr:(?:twoCellAnchor|oneCellAnchor)>/g;
+    const rowToMedia = {};
+    let am;
+    while ((am = anchorRe.exec(drawingXml))) {
+      const block = am[0];
+      const rowM = block.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/);
+      const embedM = block.match(/r:embed="(rId\d+)"/);
+      if (!rowM || !embedM) continue;
+      const mediaPath = rIdToMedia[embedM[1]];
+      if (mediaPath) rowToMedia[parseInt(rowM[1], 10)] = mediaPath;
+    }
+    const mediaNames = [...new Set(Object.values(rowToMedia))];
+    if (!mediaNames.length) return images;
+    const step3 = await zipReadEntries(buf, mediaNames);
+    Object.keys(rowToMedia).forEach(row => {
+      const data = step3[rowToMedia[row]];
+      if (!data) return;
+      images[row] = { data, ext: (rowToMedia[row].split(".").pop() || "png").toLowerCase() };
+    });
+  } catch (e) { /* 抠图失败就返回已抠到的部分(可能是空)，不影响正常的表格文字导入 */ }
+  return images;
 }
 // 缩略图（editable 时带删除叉）
 function photoThumbs(urls, editable, ctx) {
@@ -568,6 +688,7 @@ function importPreviewHtml() {
       <div class="imp-head">第 ${i + 1} 单${importPreview.length > 1 ?
         `<button class="btn plain right" style="color:var(--bad)" onclick="A.removeImportRow(${i})">移除</button>` : ""}</div>
       <label class="field"><span>订单季节</span>${seasonSelectHtml(r.season, "imp" + i + "-")}</label>
+      <label class="field"><span>款式图</span>${photoPicker("imp" + i + "-img")}</label>
       <div class="grid2">${orderScalars.map(f => fieldRow(f, r.values[f.k] || "", "imp" + i + "-")).join("")}</div>
       <div class="grid2">${prodScalars.map(f => fieldRow(f, r.values[f.k] || "", "imp" + i + "-")).join("")}</div>
     </div>`).join("")}
@@ -578,14 +699,14 @@ function importPreviewHtml() {
 
 /* ---------- 订单详情 ---------- */
 // 一条打卡记录的展示（改/删链接 + 文字 + 照片），主厂/加工点/普通进度字段共用
-function logEntriesHtml(list, oid, key) {
+function logEntriesHtml(list, o, key) {
   const entries = (list || []).slice().sort((a, b) => b.t - a.t);
   if (!entries.length) return `<div class="empty" style="padding:8px 0">暂无打卡记录</div>`;
   const isMainSub = key === "mainLog" || key.startsWith("sub:");
   return `<ul class="log">${entries.map(e => `<li>
     <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>
-      ${canTouchEntry(e) ? `<span class="act-row"><button type="button" class="act-btn" onclick="A.editLog('${oid}','${key}','${e.id}')">改</button>
-      <button type="button" class="act-btn danger" onclick="A.delLog('${oid}','${key}','${e.id}')">删</button></span>` : ""}</div>
+      ${canTouchEntry(o, e) ? `<span class="act-row"><button type="button" class="act-btn" onclick="A.editLog('${o.id}','${key}','${e.id}')">改</button>
+      <button type="button" class="act-btn danger" onclick="A.delLog('${o.id}','${key}','${e.id}')">删</button></span>` : ""}</div>
     ${isMainSub && e.process ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">
       生产工序：${esc(e.process)} · 车工人数：${esc(e.workers)} · 预计下车：${esc(fmtDate(e.estDone))}</div>` : ""}
     ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>`;
@@ -608,7 +729,7 @@ function logFieldHtml(o, f, list, addKey, canAdd) {
       <textarea class="in" id="txt-${addKey}" placeholder="填写当前进度情况，可详细描述…"></textarea>
       ${photoPicker("log:" + addKey)}
       <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','${addKey}')">提交打卡</button></div></div>` : ""}
-    ${logEntriesHtml(list, o.id, addKey)}</div>`;
+    ${logEntriesHtml(list, o, addKey)}</div>`;
 }
 // 一个动态"加工点"卡片：可编辑(名称+工序/人数/预计下车时间)、可打卡、管理员可删除
 function subCardHtml(o, s, canProdLog) {
@@ -621,7 +742,7 @@ function subCardHtml(o, s, canProdLog) {
       ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('${key}')">＋ 打卡</button>` : ""}
     </div>
     ${canProdLog ? mainSubAddBoxHtml(o.id, key, "该加工点的进度情况（补充说明，选填）…") : ""}
-    ${logEntriesHtml(s.log, o.id, key)}</div>`;
+    ${logEntriesHtml(s.log, o, key)}</div>`;
 }
 // 验货：一条"发现问题/整改情况"的展示（两个字段各自独立可编辑）
 function inspItemHtml(o, g, it, canInsp, canFix) {
@@ -640,7 +761,7 @@ function inspItemHtml(o, g, it, canInsp, canFix) {
 function inspBatchHtml(o, g, canInsp, canFix) {
   return `<div class="insp-day">
     <div class="lf-head"><span style="font-weight:400;color:var(--ink-2);font-size:12.5px">${esc(g.byName)} · <span class="num">${fmtT(g.t)}</span></span>
-      ${(isAdmin() || g.by === me().id) ? `<button type="button" class="act-btn danger right" onclick="A.delInsp('${o.id}','${g.id}')">删除</button>` : ""}</div>
+      ${canTouchEntry(o, g) ? `<button type="button" class="act-btn danger right" onclick="A.delInsp('${o.id}','${g.id}')">删除</button>` : ""}</div>
     ${g.items.map(it => inspItemHtml(o, g, it, canInsp, canFix)).join("")}${photoGallery(g.photos)}</div>`;
 }
 function vDetail() {
@@ -649,7 +770,7 @@ function vDetail() {
   const scalars = s => state.fields[s].filter(f => f.type !== "log");
   const logsOf = s => state.fields[s].filter(f => f.type === "log");
   const canB = canEditBasic(o), canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
-  const canInsp = canWriteInspProblem(), canFix = canWriteInspFix(o);
+  const canInsp = canWriteInspProblem(o), canFix = canWriteInspFix(o);
   // 订单交期/发货日期这两个字段单独摘出来，有编辑权限时直接在详情页点选就改，不用进编辑页；
   // 其它日期类字段(比如预计下车时间)是普通字段，跟着所属的分组(服装工厂旁边)走正常编辑流程
   const isQuickDateField = f => f.k === "deadline" || f.k === "shipDate";
@@ -678,6 +799,10 @@ function vDetail() {
       ${headerThumb}
     </div></div></section>
 
+  ${shipLocked(o) ? `<section class="group"><div class="card" style="background:var(--bad-soft);padding:12px 16px">
+    <div style="color:var(--bad);font-weight:700;font-size:13.5px">⚠️ 发货日期一经勾选，所有内容无法更改！！！${isAdmin() ? "（管理员仍可修改）" : ""}</div>
+  </div></section>` : ""}
+
   <section class="group">
     <div class="group-title"><span class="cat-title">一、订单明细</span>${canB ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}</div>
     <div class="card">${editingBasic && canB
@@ -702,7 +827,7 @@ function vDetail() {
             <span class="tag hl">${esc(o.values.factory) || "未指定"}</span>
             ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('mainLog')">＋ 打卡</button>` : ""}</div>
           ${canProdLog ? mainSubAddBoxHtml(o.id, "mainLog", "本厂生产进度（补充说明，选填）…") : ""}
-          ${logEntriesHtml(o.mainLog, o.id, "mainLog")}</div>
+          ${logEntriesHtml(o.mainLog, o, "mainLog")}</div>
         ${(o.subs || []).map(s => subCardHtml(o, s, canProdLog)).join("")}
         ${canProdLog ? `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
           <button class="btn mini ghost" onclick="A.addSubPrompt('${o.id}')">＋ 添加加工点</button></div>` : ""}
@@ -732,7 +857,7 @@ function vDetail() {
         ${photoPicker("follow")}
         <div style="margin-top:8px"><button class="btn mini" onclick="A.addFollow('${o.id}')">提交</button></div></div>
       ${o.followIssues.length ? `<ul class="log" style="padding:4px 16px 12px">${o.followIssues.slice().sort((a, b) => b.t - a.t).map(e => `<li>
-        <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>${canTouchEntry(e) ?
+        <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>${canTouchEntry(o, e) ?
           `<button type="button" class="act-btn danger" onclick="A.delFollow('${o.id}','${e.id}')">删</button>` : ""}</div>
         ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>` : `<div class="empty">暂无记录</div>`}</div>
   </section>
@@ -890,9 +1015,13 @@ function vAdmin() {
   <section class="group">
     <div class="group-title">职位管理</div>
     <div class="card"><div class="card-pad">
-      <div style="display:flex;gap:8px;flex-wrap:wrap">${state.roles.map(r => `<span class="tag role">${esc(r.label)}
-        · ${r.template === "sales" ? "业务员权限" : "下厂员权限"}${r.core ? "" :
-          ` <a href="javascript:void(0)" onclick="A.delRole('${r.k}')" style="margin-left:4px">✕</a>`}</span>`).join("")}</div></div>
+      <p style="font-size:12.5px;color:var(--ink-2);margin:0 0 10px">默认"谁负责的内容谁有权限"（本单业务员/下厂员/创建人才能改）；勾选"完全权限"的职位不受此限制，能管理所有订单。</p>
+      <div style="display:flex;flex-direction:column;gap:10px">${state.roles.map(r => `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <span class="tag role">${esc(r.label)} · ${r.template === "sales" ? "业务员权限" : "下厂员权限"}${r.core ? "" :
+          ` <a href="javascript:void(0)" onclick="A.delRole('${r.k}')" style="margin-left:4px">✕</a>`}</span>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2)">
+          <input type="checkbox" ${r.fullAccess ? "checked" : ""} onchange="A.toggleRoleFullAccess('${r.k}', this.checked)"> 完全权限</label>
+      </div>`).join("")}</div></div>
       <label class="field"><span>新职位名称</span><input class="in" id="nr-label" placeholder="例：跟单主管"></label>
       <label class="field"><span>权限模板</span><select class="in" id="nr-template">
         <option value="sales">业务员权限（可建单、改自己录入的订单）</option>
@@ -1307,6 +1436,9 @@ const A = {
     modal({ title: `删除职位「${r.label}」？`, body: "只有没人担任该职位时才能删除。", danger: true, okText: "确认删除",
       onOk: () => run(() => api("DELETE", "/roles/" + k), "职位已删除") });
   },
+  toggleRoleFullAccess(k, fullAccess) {
+    run(() => api("PATCH", "/roles/" + k, { fullAccess }), fullAccess ? "已开启完全权限" : "已关闭完全权限");
+  },
   async addSeason() {
     const name = $("ns-name").value.trim();
     if (!name) return toast("请填写季节名称");
@@ -1476,7 +1608,8 @@ const A = {
       await A.importFileServerFallback(f);
     } finally { input.disabled = false; if (btn) btn.disabled = false; }
   },
-  // 本地解析：只读表格文字，不涉及图片，SheetJS 自己处理 zip/压缩，不需要额外的解压逻辑
+  // 本地解析：表格文字在本地直接解出来(不用上传原始文件)；表格里贴的图片也在本地抠出来，
+  // 抠到的图片先在本地压缩(跟平时拍照上传一样)再各自上传，不用把整份大文件传去服务器
   async importFileClientSide(f) {
     toast("正在本地解析文件…", true);
     const buf = await f.arrayBuffer();
@@ -1495,11 +1628,38 @@ const A = {
     const rawRows = minR === Infinity ? [] :
       XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", range: { s: { r: minR, c: minC }, e: { r: maxR, c: maxC } } })
         .map(r => r.map(c => (c == null ? "" : String(c).trim())));
-    const rows = rawRows.filter(r => r.some(c => c !== ""));
+    const rows = []; const origToFiltered = {};
+    rawRows.forEach((r, origIdx) => { if (r.some(c => c !== "")) { origToFiltered[origIdx] = rows.length; rows.push(r); } });
     if (rows.length < 2) throw new Error("至少需要表头和一行数据");
+
+    toast("正在识别表格里的图片…", true);
+    const found = await extractEmbeddedImagesClient(buf);
+    const rowImages = {};
+    // 图片一张张排队上传太慢(压缩+上传的时间会累加)，改成同时传几张(并发3张)，网络等待的时间能重叠起来
+    const entries = Object.keys(found)
+      .map(origRow => ({ filteredIdx: origToFiltered[origRow], img: found[origRow] }))
+      .filter(e => e.filteredIdx !== undefined && e.img.data.length <= 8 * 1024 * 1024); // 跟平时拍照上传的单张图片大小上限保持一致
+    if (entries.length) {
+      let done = 0;
+      toast(`正在上传图片…（0/${entries.length}）`, true);
+      let next = 0;
+      const worker = async () => {
+        while (next < entries.length) {
+          const { filteredIdx, img } = entries[next++];
+          try {
+            const mime = img.ext === "png" ? "image/png" : img.ext === "gif" ? "image/gif" : "image/jpeg";
+            const url = await uploadOnePhoto(new Blob([img.data], { type: mime }));
+            if (url) rowImages[filteredIdx] = url;
+          } catch (e) { /* 单张图片传失败就跳过，不影响其它行的数据 */ }
+          done++;
+          toast(`正在上传图片…（${done}/${entries.length}）`, true);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, entries.length) }, worker));
+    }
     importRaw = "";
     toast("解析完成");
-    A.showPreview(A.rowsToPreview(rows));
+    A.showPreview(A.rowsToPreview(rows, rowImages), Object.keys(rowImages).length ? "，已自动识别表格里的款式图" : "");
   },
   // 服务器解析：本地不支持(比如很老的机型加载不了解析组件)或本地解析出问题时的兜底
   async importFileServerFallback(f) {
@@ -1528,8 +1688,9 @@ const A = {
         xhr.send(fd);
       });
       importRaw = "";
+      const gotImages = j.rowImages && Object.keys(j.rowImages).length;
       toast("解析完成");
-      A.showPreview(A.rowsToPreview(j.rows), j.encoding === "GBK" ? "（已按 GBK 编码读取）" : "");
+      A.showPreview(A.rowsToPreview(j.rows, j.rowImages), (j.encoding === "GBK" ? "（已按 GBK 编码读取）" : "") + (gotImages ? "，已自动识别表格里的款式图" : ""));
     } catch (e) { toast((e && e.error) || "文件解析失败"); }
   },
   // 表头列名 -> 字段
@@ -1542,7 +1703,7 @@ const A = {
       "绣花工厂": "embFactory", "印花工厂": "printFactory", "绣印工厂": "embFactory" }; // 绣印工厂 是旧表头，兼容老导入模板
   },
   // 二维数组（首行表头）-> 待确认的订单列表
-  rowsToPreview(grid) {
+  rowsToPreview(grid, rowImages) {
     const MAP = A.importMap();
     // 找表头行：前 10 行里第一行"含已知列名"的行（容忍标题行/空行在上面）
     let hi = 0;
@@ -1572,14 +1733,20 @@ const A = {
       });
       if (!values.styleNo && !values.styleName) continue;
       if (me().template === "sales" && !values.sales) values.sales = me().id;
+      if (rowImages && rowImages[i]) values.img = [rowImages[i]]; // WPS/Excel 表格里嵌入的款式图，按行号配对带出来
       out.push({ season: season || "", values });
     }
     return out;
   },
   showPreview(rows, extra) {
     if (!rows.length) return toast("未识别到有效数据，请检查表头列名");
-    importPreview = rows; render();
+    importPreview = rows; A.resyncImportPhotoDrafts(); render();
     toast(`识别到 ${rows.length} 单${extra || ""}，已填入下方表单，可修改后确认导入`);
+  },
+  // 导入预览里每行的款式图草稿：按 importPreview 当前的下标重建，避免"移除某一行"后下标错位串图
+  resyncImportPhotoDrafts() {
+    Object.keys(photoDraft).forEach(k => { if (/^imp\d+-img$/.test(k)) delete photoDraft[k]; });
+    (importPreview || []).forEach((r, i) => { photoDraft["imp" + i + "-img"] = normalizePhotos(r.values.img); });
   },
   importText() {
     const raw = ($("imp-text").value || "").trim();
@@ -1607,6 +1774,8 @@ const A = {
     const scal = importScalars();
     importPreview.forEach((r, i) => {
       const se = $("imp" + i + "-season"); if (se) r.season = se.value || "";
+      const img = photoDraft["imp" + i + "-img"];
+      if (img && img.length) r.values.img = img.slice(); else delete r.values.img;
       scal.forEach(f => {
         const el = $("imp" + i + "-" + f.k); if (!el) return;
         if (isMultiFactory(f)) {
@@ -1621,9 +1790,14 @@ const A = {
   removeImportRow(i) {
     A.syncImportInputs(); if (!importPreview) return;
     importPreview.splice(i, 1); if (!importPreview.length) importPreview = null;
+    A.resyncImportPhotoDrafts();
     render();
   },
-  cancelImport() { importPreview = null; render(); toast("已取消，未导入任何数据"); },
+  cancelImport() {
+    importPreview = null;
+    Object.keys(photoDraft).forEach(k => { if (/^imp\d+-img$/.test(k)) delete photoDraft[k]; });
+    render(); toast("已取消，未导入任何数据");
+  },
   async confirmImport() {
     if (!importPreview || !importPreview.length) return;
     A.syncImportInputs();
@@ -1633,6 +1807,7 @@ const A = {
     try {
       const r = await api("POST", "/orders/import", { orders: built });
       importPreview = null; importRaw = "";
+      Object.keys(photoDraft).forEach(k => { if (/^imp\d+-img$/.test(k)) delete photoDraft[k]; });
       await refresh(); go("orders"); toast(`成功导入 ${r.imported} 个订单`);
     } catch (e) { toast((e && e.error) || "导入失败"); }
   }

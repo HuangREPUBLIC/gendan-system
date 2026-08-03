@@ -17,6 +17,52 @@ const A = require("./auth");
 const router = express.Router();
 
 /**
+ * 从 xlsx（本质是个 zip 包）里把嵌入的图片(比如 WPS/Excel 表格里直接贴的款式图)抠出来，
+ * 按图片锚定的行号(0-based，跟表头一起算，跟 sheet_to_json 的行下标对得上)配对。
+ * 只处理"第一个工作表 + 它关联的 drawing"这个最常见的场景；解析失败/找不到就静默返回空，
+ * 不影响正常的表格文字数据导入——图片是锦上添花，不是必须的。
+ */
+function extractEmbeddedImages(buf) {
+  const images = {}; // 0-based 行号 -> { data: Buffer, ext: string }
+  let zip;
+  try { zip = new AdmZip(buf); } catch (e) { return images; }
+  const entries = {}; zip.getEntries().forEach(e => { entries[e.entryName] = e; });
+
+  const sheetRels = entries["xl/worksheets/_rels/sheet1.xml.rels"];
+  if (!sheetRels) return images;
+  const sheetRelsXml = sheetRels.getData().toString("utf8");
+  const drawingRefM = sheetRelsXml.match(/Target="[^"]*?(drawing\d*\.xml)"/);
+  if (!drawingRefM) return images;
+  const drawingEntry = entries["xl/drawings/" + drawingRefM[1]];
+  if (!drawingEntry) return images;
+  const drawingXml = drawingEntry.getData().toString("utf8");
+
+  const drawingRelsEntry = entries["xl/drawings/_rels/" + drawingRefM[1] + ".rels"];
+  const rIdToMedia = {};
+  if (drawingRelsEntry) {
+    const relsXml = drawingRelsEntry.getData().toString("utf8");
+    const re = /<Relationship[^>]*Id="(rId\d+)"[^>]*Target="[^"]*?(media\/[^"]+)"/g;
+    let m;
+    while ((m = re.exec(relsXml))) rIdToMedia[m[1]] = "xl/" + m[2];
+  }
+
+  const anchorRe = /<xdr:(?:twoCellAnchor|oneCellAnchor)[\s\S]*?<\/xdr:(?:twoCellAnchor|oneCellAnchor)>/g;
+  let am;
+  while ((am = anchorRe.exec(drawingXml))) {
+    const block = am[0];
+    const rowM = block.match(/<xdr:from>[\s\S]*?<xdr:row>(\d+)<\/xdr:row>/);
+    const embedM = block.match(/r:embed="(rId\d+)"/);
+    if (!rowM || !embedM) continue;
+    const mediaPath = rIdToMedia[embedM[1]];
+    const mediaEntry = mediaPath && entries[mediaPath];
+    if (!mediaEntry) continue;
+    const row = parseInt(rowM[1], 10);
+    images[row] = { data: mediaEntry.getData(), ext: (path.extname(mediaPath) || ".png").toLowerCase() };
+  }
+  return images;
+}
+
+/**
  * 把真实图片写进导出的 xlsx，而不是"（有图）"文字或裸链接。
  * placements: [{ sheet: 1起(对应 sheetN.xml 的顺序), row: 0-based(含表头行), col: 0-based, urls: ["/uploads/xxx.jpg", ...] }]
  * 每个 (sheet,row) 目前只会对应一个照片列（各分表"照片"都是固定的最后一列，或订单基本信息里"款式图"独占一列），
@@ -481,7 +527,7 @@ router.patch("/orders/:id/logs/:key/:entryId", (req, res) => {
   const list = listForKey(o, req.params.key);
   const e = list && list.find(x => x.id === req.params.entryId);
   if (!e) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canTouchEntry(req.user, e)) return res.status(403).json({ error: "只能修改自己的打卡记录" });
+  if (!A.canTouchEntry(req.user, o, e)) return res.status(403).json({ error: "无权修改这条打卡记录" });
   const t = String((req.body || {}).text || "").trim();
   const photos = Array.isArray((req.body || {}).photos) ? cleanPhotos((req.body || {}).photos) : (e.photos || []);
   if (!t && !photos.length) return res.status(400).json({ error: "内容和照片不能都为空" });
@@ -495,7 +541,7 @@ router.delete("/orders/:id/logs/:key/:entryId", (req, res) => {
   const list = listForKey(o, req.params.key);
   const e = list && list.find(x => x.id === req.params.entryId);
   if (!e) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canTouchEntry(req.user, e)) return res.status(403).json({ error: "只能删除自己的打卡记录" });
+  if (!A.canTouchEntry(req.user, o, e)) return res.status(403).json({ error: "无权删除这条打卡记录" });
   list.splice(list.indexOf(e), 1); saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -543,7 +589,7 @@ router.delete("/orders/:id/subs/:subId", A.adminRequired, (req, res) => {
 router.post("/orders/:id/inspections", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
-  if (!A.canWriteInspProblem(req.user)) return res.status(403).json({ error: "只有业务员或管理员可以记录验货发现的问题" });
+  if (!A.canWriteInspProblem(req.user, o)) return res.status(403).json({ error: "无权在此订单记录验货发现的问题" });
   const problems = ((req.body || {}).problems || []).map(x => String(x || "").trim()).filter(Boolean);
   const inspPhotos = cleanPhotos((req.body || {}).photos);
   if (!problems.length && !inspPhotos.length) return res.status(400).json({ error: "请至少填写一条发现的问题或添加照片" });
@@ -567,7 +613,7 @@ router.patch("/orders/:id/inspections/:instId/items/:itemId", (req, res) => {
   const body = req.body || {};
   let touched = false;
   if (body.problem !== undefined) {
-    if (!A.canWriteInspProblem(req.user)) return res.status(403).json({ error: "只有业务员或管理员可以修改发现的问题" });
+    if (!A.canWriteInspProblem(req.user, o)) return res.status(403).json({ error: "无权修改发现的问题" });
     const v = String(body.problem).trim();
     if (!v) return res.status(400).json({ error: "发现的问题不能为空" });
     item.problem = v; item.problemBy = req.user.id; item.problemByName = req.user.name; item.problemAt = Date.now();
@@ -590,7 +636,7 @@ router.post("/orders/:id/inspections/:instId/items/:itemId/notes", (req, res) =>
   const batch = o.data.inspections.find(x => x.id === req.params.instId);
   const item = batch && batch.items.find(x => x.id === req.params.itemId);
   if (!item) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canWriteInspProblem(req.user) && !A.canWriteInspFix(req.user, o)) return res.status(403).json({ error: "无权添加补充说明" });
+  if (!A.canWriteInspProblem(req.user, o) && !A.canWriteInspFix(req.user, o)) return res.status(403).json({ error: "无权添加补充说明" });
   const text = String((req.body || {}).text || "").trim();
   if (!text) return res.status(400).json({ error: "请填写补充说明" });
   item.notes = item.notes || [];
@@ -604,7 +650,7 @@ router.delete("/orders/:id/inspections/:inspId", (req, res) => {
   if (!o) return res.status(404).json({ error: "订单不存在" });
   const g = o.data.inspections.find(x => x.id === req.params.inspId);
   if (!g) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canTouchEntry(req.user, g)) return res.status(403).json({ error: "只能删除自己创建的验货记录" });
+  if (!A.canTouchEntry(req.user, o, g)) return res.status(403).json({ error: "无权删除这条验货记录" });
   o.data.inspections = o.data.inspections.filter(x => x.id !== g.id); saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -613,6 +659,7 @@ router.delete("/orders/:id/inspections/:inspId", (req, res) => {
 router.post("/orders/:id/follow", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
+  if (!A.canAddLog(req.user, o)) return res.status(403).json({ error: "无权在此订单添加跟单小结" });
   const t = String((req.body || {}).text || "").trim();
   const photos = cleanPhotos((req.body || {}).photos);
   if (!t && !photos.length) return res.status(400).json({ error: "请填写内容或添加照片" });
@@ -626,7 +673,7 @@ router.delete("/orders/:id/follow/:entryId", (req, res) => {
   if (!o) return res.status(404).json({ error: "订单不存在" });
   const e = o.data.followIssues.find(x => x.id === req.params.entryId);
   if (!e) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canTouchEntry(req.user, e)) return res.status(403).json({ error: "只能删除自己的记录" });
+  if (!A.canTouchEntry(req.user, o, e)) return res.status(403).json({ error: "无权删除这条记录" });
   o.data.followIssues = o.data.followIssues.filter(x => x.id !== e.id); saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -645,6 +692,16 @@ router.post("/roles", A.adminRequired, (req, res) => {
   const roles = getSetting("roles", []);
   if (roles.some(r => r.label === name)) return res.status(400).json({ error: "已有同名职位" });
   roles.push({ k: "r" + Date.now(), label: name, template });
+  setSetting("roles", roles);
+  res.json(roles);
+});
+
+// 完全权限开关：勾上的职位不受"谁负责的内容谁有权限"限制，能管理所有订单(管理员一直是这样，不用勾)
+router.patch("/roles/:k", A.adminRequired, (req, res) => {
+  const roles = getSetting("roles", []);
+  const r = roles.find(x => x.k === req.params.k);
+  if (!r) return res.status(404).json({ error: "职位不存在" });
+  r.fullAccess = !!(req.body || {}).fullAccess;
   setSetting("roles", roles);
   res.json(roles);
 });
@@ -850,10 +907,29 @@ router.post("/import/parse", (req, res, next) => {
     ? XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "", range: usedRange })
         .map(r => r.map(c => (c == null ? "" : String(c).trim())))
     : [];
-  const rows = rawRows.filter(r => r.some(c => c !== ""));
+  // 过滤掉空行的同时，记一下"原始行号 -> 过滤后行号"的对应关系，
+  // 好让嵌入图片(按原始行号锚定)能对上过滤后、真正发给前端的那份 rows 的下标
+  const rows = []; const origToFiltered = {};
+  rawRows.forEach((r, origIdx) => { if (r.some(c => c !== "")) { origToFiltered[origIdx] = rows.length; rows.push(r); } });
   if (rows.length < 2) return res.status(400).json({ error: "至少需要表头和一行数据" });
 
-  res.json({ rows, sheet: wb.SheetNames[0], encoding });
+  // WPS/Excel 表格里直接贴的图片(比如款式图)：尝试抠出来，按行号配对，失败也不影响文字数据导入
+  const rowImages = {};
+  if (ext === ".xlsx") {
+    try {
+      const found = extractEmbeddedImages(req.file.buffer);
+      Object.keys(found).forEach(origRow => {
+        const filteredIdx = origToFiltered[origRow];
+        if (filteredIdx === undefined) return;
+        const img = found[origRow];
+        if (img.data.length > 8 * 1024 * 1024) return; // 跟 /api/upload 的单张图片大小上限保持一致
+        const fname = uid() + (img.ext || ".png");
+        fs.writeFileSync(path.join(UPLOAD_DIR, fname), img.data);
+        rowImages[filteredIdx] = "/uploads/" + fname;
+      });
+    } catch (e) { /* 图片抠取失败就算了，不影响正常的表格文字导入 */ }
+  }
+  res.json({ rows, sheet: wb.SheetNames[0], encoding, rowImages });
 });
 
 /* ---------- 导出 Excel（管理员）：订单基本信息 + 生产进度 + 验货问题 + 跟单小结，可按季节筛选 ---------- */

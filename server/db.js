@@ -202,6 +202,21 @@ function ensureDefaults() {
       console.log("[db] 已撤回「生产工序」「车工人数」「预计下车时间」挂在服装工厂旁边的字段，改回本厂打卡时填");
     }
   }
+  // 权限从"所有职位统一权限"改回"谁负责的内容谁有权限"后，管理员+两个主管(技术主管/业务主管)
+  // 需要保留全部权限，不受负责人限制——给这两个职位打开 fullAccess 开关(以后要调整，管理员在
+  // 职位管理里打勾就行，这里只是保证刚上线时这两个职位已经是勾上的状态，不用手动去点)
+  const rolesForFullAccess = getSetting("roles", []);
+  let fullAccessChanged = false;
+  rolesForFullAccess.forEach(r => {
+    if ((r.label === "技术主管" || r.label === "业务主管") && !r.fullAccess) {
+      r.fullAccess = true;
+      fullAccessChanged = true;
+    }
+  });
+  if (fullAccessChanged) {
+    setSetting("roles", rolesForFullAccess);
+    console.log("[db] 已给「技术主管」「业务主管」职位开启完全权限");
+  }
   migrateOrdersSchema();
 }
 
