@@ -79,19 +79,21 @@ function adminRequired(req, res, next) {
 
 /* ---------- 权限判定（与前端保持一致，但以此处为准） ----------
  * 谁负责的内容谁有权限：本单的业务员/下厂员/创建人可以添加删除这单的内容。
- * 职位可以在「职位管理」里勾选"完全权限"，勾了的职位(以及管理员)不受负责人限制，
- * 能管理所有订单——这样以后要调整谁有全权限，管理员在设置里打勾就行，不用改代码。
- * 发货日期一旦填写，说明这单已经走完流程要发货了，除了管理员，任何人(包括完全权限的职位)
+ * 职位可以在「职位管理」里按操作类型细分勾选：添加内容(permAdd)/修改他人内容(permEdit)/
+ * 删除内容(permDelete)，勾了对应项的职位(以及管理员，管理员固定全勾)在那一类操作上
+ * 不受负责人限制——这样以后要调整谁有哪类权限，管理员在设置里打勾就行，不用改代码。
+ * 发货日期一旦填写，说明这单已经走完流程要发货了，除了管理员，任何人(包括勾了权限的职位)
  * 都不能再改这单的任何内容，防止发货后数据被误改。
  * 删除整单/删除加工点这两个不可逆操作仍然只留给管理员(见 routes.js 里对应路由的 adminRequired)。
  */
 const isAdmin = (u) => u && u.role === "admin";
-// 完全权限：管理员固定拥有；其它职位由「职位管理」里的开关决定(settings.roles 里的 fullAccess)
-function hasFullAccess(u) {
+// kind: "Add" | "Edit" | "Delete"。管理员固定拥有全部；其它职位由「职位管理」里对应的开关决定
+// (settings.roles 里的 permAdd/permEdit/permDelete)
+function hasPerm(u, kind) {
   if (!u) return false;
   if (u.role === "admin") return true;
   const r = getSetting("roles", []).find(x => x.k === u.role);
-  return !!(r && r.fullAccess);
+  return !!(r && r["perm" + kind]);
 }
 // 是否是这单的负责人：业务员、下厂员，或者创建人
 function isResponsible(u, order) {
@@ -103,35 +105,36 @@ function isResponsible(u, order) {
 function shipLocked(order) {
   return !!((order && order.data && order.data.values) || {}).shipDate;
 }
-// 能否编辑订单基本信息
+// 能否编辑订单基本信息(算"修改"类操作)
 function canEditBasic(u, order) {
   if (!u) return false;
   if (isAdmin(u)) return true;
   if (shipLocked(order)) return false;
-  return hasFullAccess(u) || isResponsible(u, order);
+  return hasPerm(u, "Edit") || isResponsible(u, order);
 }
-// 能否在某板块打卡/添加内容
+// 能否在某板块打卡/添加内容("添加"类操作)
 function canAddLog(u, order, section) {
   if (!u) return false;
   if (isAdmin(u)) return true;
   if (shipLocked(order)) return false;
-  return hasFullAccess(u) || isResponsible(u, order);
+  return hasPerm(u, "Add") || isResponsible(u, order);
 }
-// 能否修改/删除某条记录：管理员；完全权限职位；这单的负责人；或者自己创建的记录
-function canTouchEntry(u, order, entry) {
+// 能否修改/删除某条记录：action 传 "edit"(默认) 或 "delete"，对应不同的细分权限
+function canTouchEntry(u, order, entry, action) {
   if (!u) return false;
   if (isAdmin(u)) return true;
   if (shipLocked(order)) return false;
-  return hasFullAccess(u) || isResponsible(u, order) || (entry && entry.by === u.id);
+  if (hasPerm(u, action === "delete" ? "Delete" : "Edit")) return true;
+  return isResponsible(u, order) || (entry && entry.by === u.id);
 }
 
-// 验货「发现问题」「整改情况」：跟其它内容一样，本单负责人/完全权限职位/管理员才能写
+// 验货「发现问题」「整改情况」：跟其它内容一样，本单负责人/有权限的职位/管理员才能写
 const canWriteInspProblem = (u, order) => canAddLog(u, order);
 const canWriteInspFix = (u, order) => canAddLog(u, order);
 
 module.exports = {
   hashPassword, verifyPassword, signToken, userPublic, userById,
-  authRequired, adminRequired, isAdmin, hasFullAccess, isResponsible, shipLocked,
+  authRequired, adminRequired, isAdmin, hasPerm, isResponsible, shipLocked,
   canEditBasic, canAddLog, canTouchEntry,
   roleTemplate, templateOf, roleLabel, canWriteInspProblem, canWriteInspFix
 };

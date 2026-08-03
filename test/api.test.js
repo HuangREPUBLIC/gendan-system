@@ -195,23 +195,36 @@ async function call(method, path, token, body) {
   ok(bigJ.rows && bigJ.rows.length === 3, "解析结果只有实际的3行数据，没有把上百万空行也读进来(表头+2行)");
   ok(bigElapsed < 5000, `!ref 夸张的表格解析耗时应该在几毫秒到几百毫秒级别，不应该卡住几十秒(实际耗时 ${bigElapsed}ms)`);
 
-  // ---- 完全权限开关：职位管理里勾上后不受"谁负责的内容谁有权限"限制 ----
+  // ---- 细分权限开关(添加/修改/删除)：职位管理里按操作类型勾上后，那一类操作不受"谁负责的内容谁有权限"限制 ----
   const newRole = await call("POST", "/roles", aT, { label: "测试主管", template: "sales" });
   ok(newRole.status === 200, "创建新职位成功");
   const newRoleK = newRole.j.find(r => r.label === "测试主管").k;
   await call("PATCH", `/users/${liu.id}`, aT, { role: newRoleK }); // 刘敏(fT)临时改成这个新职位
-  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "cutting", text: "还没开完全权限" })).status === 403,
-    "还没打开完全权限开关前，「测试主管」还是只能管自己负责的订单");
-  ok((await call("PATCH", `/roles/${newRoleK}`, aT, { fullAccess: true })).status === 200, "管理员打开「测试主管」的完全权限开关");
-  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "cutting", text: "完全权限打卡" })).status === 200,
-    "打开完全权限开关后，「测试主管」能管理任何订单(不受负责人限制)");
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "cutting", text: "还没开权限" })).status === 403,
+    "还没打开任何细分权限前，「测试主管」还是只能管自己负责的订单");
+  ok((await call("PATCH", `/roles/${newRoleK}`, aT, { permAdd: true })).status === 200, "管理员给「测试主管」打开「添加」权限");
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "cutting", text: "有添加权限了" })).status === 200,
+    "打开「添加」权限后，「测试主管」能在任何订单上添加内容(打卡)");
+  // 用管理员创建的记录(al)测试"修改别人记录"的权限边界——不能用刘敏自己刚加的那条，
+  // 因为"自己创建的记录随时能改/删"这条规则是独立生效的，跟这里要测的细分权限无关，会干扰判断
+  const othersLog = al.j.logs.cutting.find(e => e.text === "管理员打卡测试");
+  ok((await call("PATCH", `/orders/${o1.id}/logs/cutting/${othersLog.id}`, fT, { text: "只有add权限，改不了别人的记录" })).status === 403,
+    "只开了「添加」权限，不代表能修改别人的记录(「修改」是单独的权限)");
+  ok((await call("PATCH", `/roles/${newRoleK}`, aT, { permEdit: true })).status === 200, "管理员再给「测试主管」打开「修改」权限");
+  ok((await call("PATCH", `/orders/${o1.id}/logs/cutting/${othersLog.id}`, fT, { text: "有修改权限了" })).status === 200,
+    "打开「修改」权限后，「测试主管」能改任何人的记录");
+  ok((await call("DELETE", `/orders/${o1.id}/logs/cutting/${othersLog.id}`, fT)).status === 403,
+    "只开了「添加/修改」权限，「删除」是单独的权限，还删不了");
+  ok((await call("PATCH", `/roles/${newRoleK}`, aT, { permDelete: true })).status === 200, "管理员再给「测试主管」打开「删除」权限");
+  ok((await call("DELETE", `/orders/${o1.id}/logs/cutting/${othersLog.id}`, fT)).status === 200,
+    "打开「删除」权限后，「测试主管」能删任何人的记录");
 
-  // ---- 发货日期锁定：一旦填写，除管理员外任何人(包括完全权限职位)都不能再改这单任何内容 ----
+  // ---- 发货日期锁定：一旦填写，除管理员外任何人(包括开了细分权限的职位)都不能再改这单任何内容 ----
   const lockOrder = await call("POST", "/orders", sT, { season: "SS2027", values: { styleNo: "LOCK-1", styleName: "锁定测试" } });
   ok(lockOrder.status === 200, "创建锁定测试订单");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-01" } })).status === 200, "业务员本人可以填发货日期");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { fabric: "锁定后想改" } })).status === 403, "发货日期填写后，本单业务员自己也不能再改了");
-  ok((await call("POST", `/orders/${lockOrder.j.id}/logs`, fT, { key: "cutting", text: "完全权限也改不了" })).status === 403, "发货日期填写后，完全权限职位也不能再改这单");
+  ok((await call("POST", `/orders/${lockOrder.j.id}/logs`, fT, { key: "cutting", text: "有权限也改不了" })).status === 403, "发货日期填写后，开了细分权限的职位也不能再改这单");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { fabric: "管理员改的" } })).status === 200, "管理员仍能修改已锁定的订单");
   await call("PATCH", `/users/${liu.id}`, aT, { role: "follower" }); // 测试收尾，把刘敏职位改回去
   await call("DELETE", `/roles/${newRoleK}`, aT); // 清理掉测试用的临时职位，避免影响其它测试文件对职位数量的断言(同一个 npm test 进程里所有测试文件共用一个服务端/数据库)

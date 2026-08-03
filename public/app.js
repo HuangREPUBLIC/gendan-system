@@ -142,13 +142,13 @@ async function run(fn, okMsg) {
 
 /* ================= 权限（仅用于显示控制） ================= */
 // 谁负责的内容谁有权限：本单业务员/下厂员/创建人可以添加删除这单的内容；
-// 职位在「职位管理」里勾了"完全权限"的(以及管理员)不受负责人限制；
+// 职位在「职位管理」里按操作类型(添加/修改/删除)勾了对应项的(以及管理员)在那一类操作上不受负责人限制；
 // 发货日期一旦填写，除管理员外任何人都不能再改这单任何内容
-function hasFullAccess() {
+function hasPerm(kind) { // kind: "Add" | "Edit" | "Delete"
   const u = me(); if (!u) return false;
   if (u.role === "admin") return true;
   const r = (state.roles || []).find(x => x.k === u.role);
-  return !!(r && r.fullAccess);
+  return !!(r && r["perm" + kind]);
 }
 function isResponsible(o) {
   const u = me(); if (!u || !o) return false;
@@ -160,19 +160,20 @@ function canEditBasic(o) {
   if (!me()) return false;
   if (isAdmin()) return true;
   if (shipLocked(o)) return false;
-  return hasFullAccess() || isResponsible(o);
+  return hasPerm("Edit") || isResponsible(o);
 }
 function canAddLog(o, section) {
   if (!me()) return false;
   if (isAdmin()) return true;
   if (shipLocked(o)) return false;
-  return hasFullAccess() || isResponsible(o);
+  return hasPerm("Add") || isResponsible(o);
 }
-const canTouchEntry = (o, e) => {
+const canTouchEntry = (o, e, action) => {
   if (!me()) return false;
   if (isAdmin()) return true;
   if (shipLocked(o)) return false;
-  return hasFullAccess() || isResponsible(o) || (e && e.by === me().id);
+  if (hasPerm(action === "delete" ? "Delete" : "Edit")) return true;
+  return isResponsible(o) || (e && e.by === me().id);
 };
 const canWriteInspProblem = (o) => canAddLog(o);
 const canWriteInspFix = (o) => canAddLog(o);
@@ -705,8 +706,8 @@ function logEntriesHtml(list, o, key) {
   const isMainSub = key === "mainLog" || key.startsWith("sub:");
   return `<ul class="log">${entries.map(e => `<li>
     <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>
-      ${canTouchEntry(o, e) ? `<span class="act-row"><button type="button" class="act-btn" onclick="A.editLog('${o.id}','${key}','${e.id}')">改</button>
-      <button type="button" class="act-btn danger" onclick="A.delLog('${o.id}','${key}','${e.id}')">删</button></span>` : ""}</div>
+      <span class="act-row">${canTouchEntry(o, e, "edit") ? `<button type="button" class="act-btn" onclick="A.editLog('${o.id}','${key}','${e.id}')">改</button>` : ""}
+      ${canTouchEntry(o, e, "delete") ? `<button type="button" class="act-btn danger" onclick="A.delLog('${o.id}','${key}','${e.id}')">删</button>` : ""}</span></div>
     ${isMainSub && e.process ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">
       生产工序：${esc(e.process)} · 车工人数：${esc(e.workers)} · 预计下车：${esc(fmtDate(e.estDone))}</div>` : ""}
     ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>`;
@@ -761,7 +762,7 @@ function inspItemHtml(o, g, it, canInsp, canFix) {
 function inspBatchHtml(o, g, canInsp, canFix) {
   return `<div class="insp-day">
     <div class="lf-head"><span style="font-weight:400;color:var(--ink-2);font-size:12.5px">${esc(g.byName)} · <span class="num">${fmtT(g.t)}</span></span>
-      ${canTouchEntry(o, g) ? `<button type="button" class="act-btn danger right" onclick="A.delInsp('${o.id}','${g.id}')">删除</button>` : ""}</div>
+      ${canTouchEntry(o, g, "delete") ? `<button type="button" class="act-btn danger right" onclick="A.delInsp('${o.id}','${g.id}')">删除</button>` : ""}</div>
     ${g.items.map(it => inspItemHtml(o, g, it, canInsp, canFix)).join("")}${photoGallery(g.photos)}</div>`;
 }
 function vDetail() {
@@ -857,7 +858,7 @@ function vDetail() {
         ${photoPicker("follow")}
         <div style="margin-top:8px"><button class="btn mini" onclick="A.addFollow('${o.id}')">提交</button></div></div>
       ${o.followIssues.length ? `<ul class="log" style="padding:4px 16px 12px">${o.followIssues.slice().sort((a, b) => b.t - a.t).map(e => `<li>
-        <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>${canTouchEntry(o, e) ?
+        <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>${canTouchEntry(o, e, "delete") ?
           `<button type="button" class="act-btn danger" onclick="A.delFollow('${o.id}','${e.id}')">删</button>` : ""}</div>
         ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>` : `<div class="empty">暂无记录</div>`}</div>
   </section>
@@ -1015,12 +1016,12 @@ function vAdmin() {
   <section class="group">
     <div class="group-title">职位管理</div>
     <div class="card"><div class="card-pad">
-      <p style="font-size:12.5px;color:var(--ink-2);margin:0 0 10px">默认"谁负责的内容谁有权限"（本单业务员/下厂员/创建人才能改）；勾选"完全权限"的职位不受此限制，能管理所有订单。</p>
       <div style="display:flex;flex-direction:column;gap:10px">${state.roles.map(r => `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
         <span class="tag role">${esc(r.label)} · ${r.template === "sales" ? "业务员权限" : "下厂员权限"}${r.core ? "" :
           ` <a href="javascript:void(0)" onclick="A.delRole('${r.k}')" style="margin-left:4px">✕</a>`}</span>
-        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2)">
-          <input type="checkbox" ${r.fullAccess ? "checked" : ""} onchange="A.toggleRoleFullAccess('${r.k}', this.checked)"> 完全权限</label>
+        <span style="display:flex;gap:12px;flex-wrap:wrap">${[["permAdd", "添加"], ["permEdit", "修改"], ["permDelete", "删除"]].map(([key, label]) =>
+          `<label style="display:flex;align-items:center;gap:4px;font-size:13px;color:var(--ink-2)">
+            <input type="checkbox" ${r[key] ? "checked" : ""} onchange="A.toggleRolePerm('${r.k}', '${key}', this.checked)"> ${label}</label>`).join("")}</span>
       </div>`).join("")}</div></div>
       <label class="field"><span>新职位名称</span><input class="in" id="nr-label" placeholder="例：跟单主管"></label>
       <label class="field"><span>权限模板</span><select class="in" id="nr-template">
@@ -1436,8 +1437,9 @@ const A = {
     modal({ title: `删除职位「${r.label}」？`, body: "只有没人担任该职位时才能删除。", danger: true, okText: "确认删除",
       onOk: () => run(() => api("DELETE", "/roles/" + k), "职位已删除") });
   },
-  toggleRoleFullAccess(k, fullAccess) {
-    run(() => api("PATCH", "/roles/" + k, { fullAccess }), fullAccess ? "已开启完全权限" : "已关闭完全权限");
+  toggleRolePerm(k, key, checked) {
+    const label = { permAdd: "添加", permEdit: "修改", permDelete: "删除" }[key] || key;
+    run(() => api("PATCH", "/roles/" + k, { [key]: checked }), (checked ? "已开启" : "已关闭") + label + "权限");
   },
   async addSeason() {
     const name = $("ns-name").value.trim();
