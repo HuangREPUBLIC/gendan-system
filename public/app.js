@@ -287,7 +287,17 @@ async function uploadOnePhoto(file) {
   const blob = await compressImage(file);
   if (!blob) return null;
   const fd = new FormData(); fd.append("image", blob, "photo.jpg");
-  const r = await fetch("/api/upload", { method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd });
+  // fetch 本身不会超时，网络卡住时一次请求可能挂很久——加个15秒上限，
+  // 这样失败重试的时候不会跟着挂两倍的时间，网络正常时完全不影响(照常很快成功)
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 15000);
+  let r;
+  try {
+    r = await fetch("/api/upload", { method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd, signal: ac.signal });
+  } catch (e) {
+    if (e && e.name === "AbortError") throw { error: "上传超时，网络太慢" };
+    throw e;
+  } finally { clearTimeout(timer); }
   const j = await r.json(); if (!r.ok) throw j;
   return j.url;
 }
