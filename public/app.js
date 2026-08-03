@@ -787,7 +787,8 @@ function vDetail() {
         <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
     : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
         <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`) +
-    (f.k === "shipDate" && shipLocked(o) ? `<div style="padding:0 16px 10px;color:var(--bad);font-weight:700;font-size:12.5px">⚠️ 发货日期一经勾选，所有内容无法更改！！！</div>` : "")
+    (f.k === "shipDate" && shipLocked(o) ? `<div style="margin:0 16px 12px;padding:10px 14px;border-radius:var(--radius);background:var(--bad-soft);color:var(--bad);font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px">
+        <span>⚠️</span><span>发货日期一经勾选，所有内容无法更改！！！</span></div>` : "")
   ).join("");
   // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
   const editForm = s => `<div class="grid2">${scalars(s).filter(f => !isQuickDateField(f)).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
