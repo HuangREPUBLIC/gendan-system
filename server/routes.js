@@ -527,7 +527,7 @@ router.patch("/orders/:id/logs/:key/:entryId", (req, res) => {
   const list = listForKey(o, req.params.key);
   const e = list && list.find(x => x.id === req.params.entryId);
   if (!e) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canTouchEntry(req.user, o, e, "edit")) return res.status(403).json({ error: "无权修改这条打卡记录" });
+  if (!A.canTouchEntry(req.user, o, e)) return res.status(403).json({ error: "无权修改这条打卡记录" });
   const t = String((req.body || {}).text || "").trim();
   const photos = Array.isArray((req.body || {}).photos) ? cleanPhotos((req.body || {}).photos) : (e.photos || []);
   if (!t && !photos.length) return res.status(400).json({ error: "内容和照片不能都为空" });
@@ -541,7 +541,7 @@ router.delete("/orders/:id/logs/:key/:entryId", (req, res) => {
   const list = listForKey(o, req.params.key);
   const e = list && list.find(x => x.id === req.params.entryId);
   if (!e) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canTouchEntry(req.user, o, e, "delete")) return res.status(403).json({ error: "无权删除这条打卡记录" });
+  if (!A.canTouchEntry(req.user, o, e)) return res.status(403).json({ error: "无权删除这条打卡记录" });
   list.splice(list.indexOf(e), 1); saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -650,7 +650,7 @@ router.delete("/orders/:id/inspections/:inspId", (req, res) => {
   if (!o) return res.status(404).json({ error: "订单不存在" });
   const g = o.data.inspections.find(x => x.id === req.params.inspId);
   if (!g) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canTouchEntry(req.user, o, g, "delete")) return res.status(403).json({ error: "无权删除这条验货记录" });
+  if (!A.canTouchEntry(req.user, o, g)) return res.status(403).json({ error: "无权删除这条验货记录" });
   o.data.inspections = o.data.inspections.filter(x => x.id !== g.id); saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -673,7 +673,7 @@ router.delete("/orders/:id/follow/:entryId", (req, res) => {
   if (!o) return res.status(404).json({ error: "订单不存在" });
   const e = o.data.followIssues.find(x => x.id === req.params.entryId);
   if (!e) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canTouchEntry(req.user, o, e, "delete")) return res.status(403).json({ error: "无权删除这条记录" });
+  if (!A.canTouchEntry(req.user, o, e)) return res.status(403).json({ error: "无权删除这条记录" });
   o.data.followIssues = o.data.followIssues.filter(x => x.id !== e.id); saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -687,24 +687,11 @@ router.post("/roles", A.adminRequired, (req, res) => {
   const { label, template } = req.body || {};
   const name = String(label || "").trim();
   if (!name) return res.status(400).json({ error: "请填写职位名称" });
-  if (!["sales", "follower"].includes(template))
-    return res.status(400).json({ error: "请选择权限模板（业务员权限 / 下厂员权限）" });
+  if (!["sales", "follower", "supervisor"].includes(template))
+    return res.status(400).json({ error: "请选择权限模板（业务员权限 / 下厂员权限 / 主管权限）" });
   const roles = getSetting("roles", []);
   if (roles.some(r => r.label === name)) return res.status(400).json({ error: "已有同名职位" });
   roles.push({ k: "r" + Date.now(), label: name, template });
-  setSetting("roles", roles);
-  res.json(roles);
-});
-
-// 细分权限开关：勾上对应项的职位在那一类操作上不受"谁负责的内容谁有权限"限制(管理员固定全勾，不用设)
-router.patch("/roles/:k", A.adminRequired, (req, res) => {
-  const roles = getSetting("roles", []);
-  const r = roles.find(x => x.k === req.params.k);
-  if (!r) return res.status(404).json({ error: "职位不存在" });
-  const body = req.body || {};
-  if (body.permAdd !== undefined) r.permAdd = !!body.permAdd;
-  if (body.permEdit !== undefined) r.permEdit = !!body.permEdit;
-  if (body.permDelete !== undefined) r.permDelete = !!body.permDelete;
   setSetting("roles", roles);
   res.json(roles);
 });

@@ -202,23 +202,23 @@ function ensureDefaults() {
       console.log("[db] 已撤回「生产工序」「车工人数」「预计下车时间」挂在服装工厂旁边的字段，改回本厂打卡时填");
     }
   }
-  // 权限从"所有职位统一权限"改回"谁负责的内容谁有权限"后，管理员+两个主管(技术主管/业务主管)
-  // 需要保留全部权限，不受负责人限制——给这两个职位打开添加/修改/删除三个细分权限开关
-  // (以后要调整，管理员在职位管理里打勾就行，这里只是保证刚上线时这两个职位已经是勾上的状态)。
-  // 另外把之前上线过的旧版单一 fullAccess 开关，一次性转换成现在的三个细分开关，保留原有效果。
+  // 权限改回按"权限模板"分三档(业务员/下厂员/主管)后，技术主管/业务主管这两个职位要用
+  // "主管"模板(能管所有订单)，不再是业务员模板——一次性迁移，以后新增主管职位直接在
+  // 职位管理里选"主管权限"模板就行。同时清理掉之前版本试过的 fullAccess/permAdd/permEdit/
+  // permDelete 这些废弃字段，避免残留数据造成混淆。
   const rolesForPerm = getSetting("roles", []);
   let permChanged = false;
   rolesForPerm.forEach(r => {
-    const shouldFull = (r.label === "技术主管" || r.label === "业务主管") || r.fullAccess;
-    if (shouldFull && !(r.permAdd && r.permEdit && r.permDelete)) {
-      r.permAdd = true; r.permEdit = true; r.permDelete = true;
-      delete r.fullAccess;
-      permChanged = true;
+    const shouldSupervise = (r.label === "技术主管" || r.label === "业务主管" || r.fullAccess || r.permAdd) && r.template !== "supervisor";
+    if (shouldSupervise) { r.template = "supervisor"; permChanged = true; }
+    if (r.fullAccess !== undefined) { delete r.fullAccess; permChanged = true; }
+    if (r.permAdd !== undefined || r.permEdit !== undefined || r.permDelete !== undefined) {
+      delete r.permAdd; delete r.permEdit; delete r.permDelete; permChanged = true;
     }
   });
   if (permChanged) {
     setSetting("roles", rolesForPerm);
-    console.log("[db] 已给「技术主管」「业务主管」职位开启添加/修改/删除权限");
+    console.log("[db] 已把「技术主管」「业务主管」职位改成「主管权限」模板");
   }
   migrateOrdersSchema();
 }
