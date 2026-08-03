@@ -997,14 +997,23 @@ const A = {
     const files = [...(input.files || [])]; input.value = "";
     if (!files.length) return;
     photoDraft[ctx] = photoDraft[ctx] || [];
+    let okCount = 0, failCount = 0;
     for (let k = 0; k < files.length; k++) {
-      toast(`上传照片 ${k + 1}/${files.length}…`);
-      try {
-        const url = await uploadOnePhoto(files[k]);
-        if (url) { photoDraft[ctx].push(url); const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
-      } catch (e) { toast((e && e.error) || "有照片上传失败"); }
+      toast(`上传照片 ${k + 1}/${files.length}…`, true);
+      // 手机网络不稳时经常传一半就断，失败了自动重试一次，别一断网就直接算失败
+      let url = null, lastErr = null;
+      for (let attempt = 0; attempt < 2 && !url; attempt++) {
+        try { url = await uploadOnePhoto(files[k]); } catch (e) { lastErr = e; }
+      }
+      if (url) { okCount++; photoDraft[ctx].push(url); const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
+      else failCount++;
+      if (!url && lastErr) console.error("照片上传失败", lastErr);
     }
-    toast("照片已添加");
+    // 之前不管成功失败最后都提示"照片已添加"，网络不好导致全部失败时也会显示成功，用户会误以为传上去了。
+    // 现在按实际结果给准确提示，一张都没成功时不再假装成功。
+    if (okCount && !failCount) toast("照片已添加");
+    else if (okCount && failCount) toast(`已添加${okCount}张，${failCount}张上传失败(请检查网络后重试)`);
+    else toast("照片上传失败，请检查网络后重试");
   },
   removeDraftPhoto(ctx, i) {
     if (photoDraft[ctx]) { photoDraft[ctx].splice(i, 1); const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
