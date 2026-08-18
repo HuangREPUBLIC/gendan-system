@@ -9,7 +9,7 @@
   --ease-out:cubic-bezier(0.23,1,0.32,1);
   --ease-drawer:cubic-bezier(0.32,0.72,0,1);
   /* 品牌色：韩航蓝 */
-  --blue:#123B6D; --blue-2:#1E5FA8; --sky:#7AB2DD; --sky-soft:#E9F3FB; --magenta:#EC008C;
+  --blue:#1C4E9D; --blue-2:#0047A0; --sky:#71CBEB; --sky-soft:#EAF7FC; --magenta:#EC008C;
   /* iOS 系统灰阶 */
   --bg:#F2F2F7; --card:#FFFFFF; --card-2:#FFFFFF;
   --ink:#000000; --ink-2:#8A8A8E; --ink-3:#C7C7CC;
@@ -22,7 +22,7 @@
 }
 @media (prefers-color-scheme: dark){
   :root{
-    --blue:#5B9BD8; --blue-2:#6EA8DF; --sky:#7AB2DD; --sky-soft:#16283D; --magenta:#EC008C;
+    --blue:#8BADE2; --blue-2:#3188F6; --sky:#71CBEB; --sky-soft:#2B3C43; --magenta:#EC008C;
     --bg:#000000; --card:#1C1C1E; --card-2:#2C2C2E;
     --ink:#FFFFFF; --ink-2:#8E8E93; --ink-3:#48484A;
     --line:#38383A; --line-2:#48484A;
@@ -32,7 +32,7 @@
   }
 }
 :root[data-theme="light"]{
-  --blue:#123B6D; --blue-2:#1E5FA8; --sky:#7AB2DD; --sky-soft:#E9F3FB; --magenta:#EC008C;
+  --blue:#1C4E9D; --blue-2:#0047A0; --sky:#71CBEB; --sky-soft:#EAF7FC; --magenta:#EC008C;
   --bg:#F2F2F7; --card:#FFFFFF; --card-2:#FFFFFF;
   --ink:#000000; --ink-2:#8A8A8E; --ink-3:#C7C7CC;
   --line:#E5E5EA; --line-2:#D1D1D6;
@@ -40,7 +40,7 @@
   --nav-bg:rgba(255,255,255,.82); --shadow:0 1px 2px rgba(0,0,0,.04);
 }
 :root[data-theme="dark"]{
-  --blue:#5B9BD8; --blue-2:#6EA8DF; --sky:#7AB2DD; --sky-soft:#16283D; --magenta:#EC008C;
+  --blue:#8BADE2; --blue-2:#3188F6; --sky:#71CBEB; --sky-soft:#2B3C43; --magenta:#EC008C;
   --bg:#000000; --card:#1C1C1E; --card-2:#2C2C2E;
   --ink:#FFFFFF; --ink-2:#8E8E93; --ink-3:#48484A;
   --line:#38383A; --line-2:#48484A;

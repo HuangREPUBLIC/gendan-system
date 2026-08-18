@@ -7,7 +7,7 @@ const ok = (c, n) => { if (c) { pass++; console.log("PASS " + n); } else { fail+
   ok(/rel="manifest"/.test(html), "首页引用 manifest");
   ok(/apple-mobile-web-app-capable"\s+content="yes"/.test(html), "iOS 全屏 meta");
   ok(/rel="apple-touch-icon"/.test(html), "iOS 主屏图标");
-  ok(/theme-color"\s+content="#123B6D"/.test(html), "状态栏主题色");
+  ok(/theme-color"\s+content="#1C4E9D"/.test(html), "状态栏主题色");
   ok(/user-scalable=no/.test(html) && /maximum-scale=1/.test(html), "手机端锁定缩放（禁止双指放大页面）");
   ok(/serviceWorker.*register\("\/sw\.js"\)/s.test(html), "注册 Service Worker");
 

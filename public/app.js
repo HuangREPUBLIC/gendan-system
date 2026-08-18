@@ -993,8 +993,8 @@ function vAdmin() {
     <div class="group-title">员工账号</div>
     <div class="card"><div class="tbl-wrap"><table class="tbl">
       <tr><th>姓名</th><th>手机号</th><th>职位</th><th>操作</th></tr>
-      ${state.users.map(u => `<tr>
-        <td>${esc(u.name)}${u.id === me().id ? ` <span class="tag">我</span>` : ""}</td>
+      ${state.users.filter(u => u.role !== "admin").map(u => `<tr>
+        <td style="white-space:nowrap">${esc(u.name)}${u.id === me().id ? ` <span class="tag">我</span>` : ""}</td>
         <td class="num">${esc(u.phone)}</td><td>${roleCell(u)}</td>
         <td style="white-space:nowrap"><button class="btn mini ghost" onclick="A.viewStaffLogs('${u.id}')">查看打卡</button>${
           u.role === "admin" ? "" : ` <button class="btn mini ghost" onclick="A.resetUserPw('${u.id}')">重置密码</button>
@@ -1317,8 +1317,9 @@ const A = {
     await run(() => api("PATCH", "/orders/" + oid, { season, values }).then(() => { editingBasic = false; photoDraft = {}; }), "已保存修改");
   },
   delOrder(oid) {
-    modal({ title: "删除此订单？", body: "删除后不可恢复，订单下的全部打卡记录一并删除。", danger: true, okText: "确认删除",
-      onOk: () => run(() => api("DELETE", "/orders/" + oid).then(() => go("orders")), "订单已删除") });
+    modal({ title: "删除此订单？", body: "删除后不可恢复，订单下的全部打卡记录一并删除。", danger: true, okText: "下一步",
+      onOk: () => modal({ title: "请确认是否要删除该订单？", body: "此操作不可撤销，请再次确认。", danger: true, okText: "确认删除",
+        onOk: () => run(() => api("DELETE", "/orders/" + oid).then(() => go("orders")), "订单已删除") }) });
   },
 
   toggleAdd(key) { const b = $("add-" + key); if (b) b.classList.toggle("show"); },
