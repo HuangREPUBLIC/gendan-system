@@ -1317,9 +1317,8 @@ const A = {
     await run(() => api("PATCH", "/orders/" + oid, { season, values }).then(() => { editingBasic = false; photoDraft = {}; }), "已保存修改");
   },
   delOrder(oid) {
-    modal({ title: "删除此订单？", body: "删除后不可恢复，订单下的全部打卡记录一并删除。", danger: true, okText: "下一步",
-      onOk: () => modal({ title: "请确认是否要删除该订单？", body: "此操作不可撤销，请再次确认。", danger: true, okText: "确认删除",
-        onOk: () => run(() => api("DELETE", "/orders/" + oid).then(() => go("orders")), "订单已删除") }) });
+    modal({ title: "删除此订单？", body: "删除后不可恢复，订单下的全部打卡记录一并删除。", danger: true, okText: "确认删除",
+      onOk: () => run(() => api("DELETE", "/orders/" + oid).then(() => go("orders")), "订单已删除") });
   },
 
   toggleAdd(key) { const b = $("add-" + key); if (b) b.classList.toggle("show"); },
