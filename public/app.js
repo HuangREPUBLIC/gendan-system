@@ -643,7 +643,7 @@ function vOrders() {
     <div class="card">${list.map(o => {
       const latest = latestLog(o);
       return `<div class="ocard" onclick="go('detail','${o.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')go('detail','${o.id}')">
-        <div class="thumb">${(function(){const c=normalizePhotos(o.values.img)[0];return c?`<img src="${esc(c)}" alt="款式图">`:"款式图";})()}</div>
+        <div class="thumb">${(function(){const photos=normalizePhotos(o.values.img);return photos.length?`<img src="${esc(photos[0])}" alt="款式图" data-gallery='${JSON.stringify(photos)}' data-i="0" onclick="event.stopPropagation();A.lightboxFromEl(this)">`:"款式图";})()}</div>
         <div class="o-main">
           <div class="o-title"><span class="tag season">${esc(o.season)}</span>${esc(o.values.styleNo || "")} ${esc([o.values.styleName, o.values.style].filter(Boolean).join(" "))}</div>
           <div class="o-meta"><span>业务员 ${esc(uname(o.values.sales)) || "—"}</span><span>下厂员 ${esc(uname(o.values.follower)) || "未指定"}</span>
