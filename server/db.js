@@ -209,8 +209,14 @@ function ensureDefaults() {
   const rolesForPerm = getSetting("roles", []);
   let permChanged = false;
   rolesForPerm.forEach(r => {
-    const shouldSupervise = (r.label === "技术主管" || r.label === "业务主管" || r.fullAccess || r.permAdd) && r.template !== "supervisor";
+    // 内置的"下厂员"职位(k==="follower")权限模板必须固定是 follower，不能被下面这条
+    // "曾带旧版 permAdd/fullAccess 标记就提升成主管权限"的规则误伤——它之前确实因为
+    // 带过这个旧标记被误升级成了"主管权限"，导致下厂员账号能看到/操作所有订单，
+    // 且订单页"下厂员"选人下拉框(按 template==="follower" 筛选)也因此是空的。
+    const shouldSupervise = r.k !== "follower" &&
+      (r.label === "技术主管" || r.label === "业务主管" || r.fullAccess || r.permAdd) && r.template !== "supervisor";
     if (shouldSupervise) { r.template = "supervisor"; permChanged = true; }
+    if (r.k === "follower" && r.template !== "follower") { r.template = "follower"; permChanged = true; }
     if (r.fullAccess !== undefined) { delete r.fullAccess; permChanged = true; }
     if (r.permAdd !== undefined || r.permEdit !== undefined || r.permDelete !== undefined) {
       delete r.permAdd; delete r.permEdit; delete r.permDelete; permChanged = true;
@@ -218,7 +224,7 @@ function ensureDefaults() {
   });
   if (permChanged) {
     setSetting("roles", rolesForPerm);
-    console.log("[db] 已把「技术主管」「业务主管」职位改成「主管权限」模板");
+    console.log("[db] 已把「技术主管」「业务主管」职位改成「主管权限」模板，并修复「下厂员」职位被误设为「主管权限」的问题");
   }
   migrateOrdersSchema();
 }
