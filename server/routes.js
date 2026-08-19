@@ -501,12 +501,21 @@ router.patch("/orders/:id", (req, res) => {
   if (values && typeof values === "object") {
     for (const key of Object.keys(values)) {
       // 发货日期一旦填写，只有管理员能再改这一个字段；不影响订单其它内容的正常编辑
-      if (key === "shipDate" && A.shipLocked(o) && !A.isAdmin(req.user)) {
-        return res.status(403).json({ error: "发货日期一经填写，只有管理员能再修改" });
+      if (key === "shipDate") {
+        if (A.shipLocked(o) && !A.isAdmin(req.user)) {
+          return res.status(403).json({ error: "发货日期一经填写，只有管理员能再修改" });
+        }
+        if (!A.canEditSection(req.user, o, "production")) {
+          return res.status(403).json({ error: "无权修改「二、生产明细」的内容" });
+        }
+        continue;
       }
-      // 指定下厂员是谁不算下厂员自己能改的内容(建单时随便指定不受此限)：只有主管/管理员能改
-      if (key === "follower" && !A.isAdmin(req.user) && !A.isSupervisor(req.user)) {
-        return res.status(403).json({ error: "无权指定下厂员，只有主管/管理员能修改" });
+      // 指定下厂员是谁算业务员能管的事(建单时随便指定不受此限)：业务员(自己的单)/主管/管理员能改，下厂员不能自己改派
+      if (key === "follower") {
+        if (!A.canEditSection(req.user, o, "order")) {
+          return res.status(403).json({ error: "无权指定下厂员" });
+        }
+        continue;
       }
       const section = sectionOfKey(key);
       if (!A.canEditSection(req.user, o, section)) {

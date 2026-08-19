@@ -39,13 +39,15 @@ async function call(method, path, token, body) {
   ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "fabricProg", text: "业务员更新面料" })).status === 200, "业务员更新订单明细(一)进度");
   ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "ironing", text: "业务员想打卡生产明细" })).status === 403, "业务员不能在生产明细(二)打卡");
   ok((await call("POST", `/orders/${o1.id}/logs`, wT, { key: "fabricProg", text: "下厂员想打卡订单明细" })).status === 403, "本单负责下厂员不能在订单明细(一)打卡");
-  // sales edit "一、订单明细" ok，改"二、生产明细"不行；下厂员反过来；跟本单无关的下厂员两边都不行
+  // sales edit "一、订单明细"(含指定下厂员) ok，改"二、生产明细"其它内容不行；下厂员反过来，
+  // 但下厂员不能自己改派"下厂员"这个字段(那算业务员管的事)；跟本单无关的下厂员两边都不行
   ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { desc: "改过的款式描述" } })).status === 200, "业务员改自己订单「一、订单明细」");
-  ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { follower: wang.id } })).status === 403, "业务员不能改「二、生产明细」的内容(比如指定下厂员)");
+  ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { follower: wang.id } })).status === 200, "业务员能指定/改派下厂员(算「一、订单明细」的内容)");
+  ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { shipDate: "2026-09-15" } })).status === 403, "业务员不能改「二、生产明细」的其它内容(比如发货日期)");
   ok((await call("PATCH", `/orders/${o1.id}`, fT, { values: { desc: "x" } })).status === 403, "跟本单无关的下厂员不能改基本信息");
   ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { desc: "王建国想改订单明细" } })).status === 403, "本单负责下厂员不能改「一、订单明细」");
   ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { shipDate: "2026-09-20" } })).status === 200, "本单负责下厂员能改「二、生产明细」的内容(比如发货日期)");
-  ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { follower: wang.id } })).status === 403, "下厂员不能自己改「下厂员」这个字段，只有主管/管理员能改");
+  ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { follower: wang.id } })).status === 403, "下厂员不能自己改派「下厂员」这个字段，那算业务员管的事");
 
   // 订单列表可见范围：业务员/下厂员只看跟自己相关的，主管/管理员不受限
   const sList = (await call("GET", "/orders", sT)).j;
