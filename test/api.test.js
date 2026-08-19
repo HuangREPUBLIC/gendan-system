@@ -43,7 +43,7 @@ async function call(method, path, token, body) {
   // 但下厂员不能自己改派"下厂员"这个字段(那算业务员管的事)；跟本单无关的下厂员两边都不行
   ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { desc: "改过的款式描述" } })).status === 200, "业务员改自己订单「一、订单明细」");
   ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { follower: wang.id } })).status === 200, "业务员能指定/改派下厂员(算「一、订单明细」的内容)");
-  ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { shipDate: "2026-09-15" } })).status === 403, "业务员不能改「二、生产明细」的其它内容(比如发货日期)");
+  ok((await call("POST", `/orders/${o1.id}/subs`, sT, { name: "业务员想加加工点" })).status === 403, "业务员不能改「二、生产明细」的其它内容(比如加工点)");
   ok((await call("PATCH", `/orders/${o1.id}`, fT, { values: { desc: "x" } })).status === 403, "跟本单无关的下厂员不能改基本信息");
   ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { desc: "王建国想改订单明细" } })).status === 403, "本单负责下厂员不能改「一、订单明细」");
   ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { shipDate: "2026-09-20" } })).status === 200, "本单负责下厂员能改「二、生产明细」的内容(比如发货日期)");
@@ -229,8 +229,7 @@ async function call(method, path, token, body) {
   // ---- 发货日期锁定：一旦填写，只锁这一个字段(除管理员外谁都不能再改)，订单其它内容不受影响 ----
   const lockOrder = await call("POST", "/orders", sT, { season: "SS2027", values: { styleNo: "LOCK-1", styleName: "锁定测试" } });
   ok(lockOrder.status === 200, "创建锁定测试订单");
-  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-01" } })).status === 403, "业务员不能设置发货日期(属于「二、生产明细」)");
-  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { shipDate: "2026-09-01" } })).status === 200, "管理员设置发货日期，把订单锁定(供下面几条锁定测试用)");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-01" } })).status === 200, "业务员(自己的单)未锁定时能设置发货日期，同时把订单锁定(供下面几条锁定测试用)");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { desc: "锁定后想改" } })).status === 200, "发货日期锁定不影响本单业务员改「一、订单明细」其它内容");
   ok((await call("POST", `/orders/${lockOrder.j.id}/logs`, fT, { key: "cutting", text: "主管仍能打卡" })).status === 200, "发货日期锁定不影响主管在此订单打卡");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-05" } })).status === 403, "发货日期锁定后，业务员还是不能再改发货日期");

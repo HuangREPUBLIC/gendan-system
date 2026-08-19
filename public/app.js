@@ -174,11 +174,12 @@ function canTouchEntry(o, e, section) {
   if (e && e.by === u.id) return true;
   return canEditSection(o, section);
 }
-// 发货日期字段本身能不能改：填过之后除管理员外谁都不能再改；没填过时按"二、生产明细"的板块权限来
+// 发货日期字段本身能不能改：填过之后除管理员外谁都不能再改；没填过时只要是本单相关人员
+// (业务员/下厂员/主管/管理员)都能设置，不分一二板块
 function canEditShipDate(o) {
   if (isAdmin()) return true;
   if (shipLocked(o)) return false;
-  return canEditSection(o, "production");
+  return canEditBasic(o);
 }
 const canWriteInspProblem = (o) => canAddLog(o);
 const canWriteInspFix = (o) => canAddLog(o);

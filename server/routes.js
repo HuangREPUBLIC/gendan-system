@@ -500,13 +500,14 @@ router.patch("/orders/:id", (req, res) => {
   }
   if (values && typeof values === "object") {
     for (const key of Object.keys(values)) {
-      // 发货日期一旦填写，只有管理员能再改这一个字段；不影响订单其它内容的正常编辑
+      // 发货日期一旦填写，只有管理员能再改这一个字段；没填写时本单相关人员(业务员/下厂员/主管/
+      // 管理员，不分一二板块)都能设置；不影响订单其它内容的正常编辑
       if (key === "shipDate") {
         if (A.shipLocked(o) && !A.isAdmin(req.user)) {
           return res.status(403).json({ error: "发货日期一经填写，只有管理员能再修改" });
         }
-        if (!A.canEditSection(req.user, o, "production")) {
-          return res.status(403).json({ error: "无权修改「二、生产明细」的内容" });
+        if (!A.canEditBasic(req.user, o)) {
+          return res.status(403).json({ error: "无权修改发货日期" });
         }
         continue;
       }
