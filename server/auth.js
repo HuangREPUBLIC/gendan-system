@@ -84,13 +84,13 @@ function adminRequired(req, res, next) {
  *    (但没有"管理"标签页那些系统设置权限，那部分仍只留给 admin)
  *  - 业务员(sales)：只能管自己创建的、或自己是业务员的订单
  *  - 下厂员(follower)：只能管自己是负责下厂员的订单
- * 发货日期一旦填写，说明这单已经走完流程要发货了，除了管理员，任何人(包括主管)
- * 都不能再改这单的任何内容，防止发货后数据被误改。
+ * 发货日期一旦填写，只锁定这个字段本身——除了管理员，任何人都不能再改发货日期；
+ * 订单其它内容(订单明细/生产明细/打卡记录等)仍按各自板块的权限正常编辑，不受影响。
  * 删除整单/删除加工点这两个不可逆操作仍然只留给管理员(见 routes.js 里对应路由的 adminRequired)。
  */
 const isAdmin = (u) => u && u.role === "admin";
 const isSupervisor = (u) => u && templateOf(u) === "supervisor";
-// 发货日期一旦填写，这单就锁死了(管理员除外)
+// 发货日期一旦填写，这个字段就锁死了(管理员除外)；只影响这一个字段，不影响订单其它内容
 function shipLocked(order) {
   return !!((order && order.data && order.data.values) || {}).shipDate;
 }
@@ -123,7 +123,6 @@ function canViewOrder(u, order) {
 function canEditSection(u, order, section) {
   if (!u) return false;
   if (isAdmin(u)) return true;
-  if (shipLocked(order)) return false;
   if (isSupervisor(u)) return true;
   const t = templateOf(u);
   if (t === "sales") return (section === undefined || section === "order") && isOwnBySales(u, order);
@@ -141,7 +140,6 @@ const canAddLog = canEditSection;
 function canTouchEntry(u, order, entry, section) {
   if (!u) return false;
   if (isAdmin(u)) return true;
-  if (shipLocked(order)) return false;
   if (isSupervisor(u)) return true;
   if (entry && entry.by === u.id) return true;
   return canEditSection(u, order, section);

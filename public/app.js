@@ -143,7 +143,7 @@ async function run(fn, okMsg) {
 /* ================= 权限（仅用于显示控制） ================= */
 // 按职位的权限模板：管理员什么都能做；主管(技术主管/业务主管等)能管所有订单；
 // 业务员只能管自己创建/负责的订单；下厂员只能管自己被指派负责的订单。
-// 发货日期一旦填写，除管理员外任何人(包括主管)都不能再改这单任何内容。
+// 发货日期一旦填写，只锁定这个字段本身(除管理员外谁都不能再改)，订单其它内容不受影响。
 function isSupervisor() { const u = me(); return !!u && u.template === "supervisor"; }
 function isOwnBySales(o) {
   const u = me(); if (!u || !o) return false;
@@ -160,7 +160,6 @@ function shipLocked(o) { return !!(o && o.values && o.values.shipDate); }
 function canEditSection(o, section) {
   const u = me(); if (!u) return false;
   if (isAdmin()) return true;
-  if (shipLocked(o)) return false;
   if (isSupervisor()) return true;
   if (u.template === "sales") return (section === undefined || section === "order") && isOwnBySales(o);
   if (u.template === "follower") return (section === undefined || section === "production") && isOwnByFollower(o);
@@ -171,10 +170,15 @@ const canAddLog = canEditSection;
 function canTouchEntry(o, e, section) {
   const u = me(); if (!u) return false;
   if (isAdmin()) return true;
-  if (shipLocked(o)) return false;
   if (isSupervisor()) return true;
   if (e && e.by === u.id) return true;
   return canEditSection(o, section);
+}
+// 发货日期字段本身能不能改：填过之后除管理员外谁都不能再改；没填过时按"二、生产明细"的板块权限来
+function canEditShipDate(o) {
+  if (isAdmin()) return true;
+  if (shipLocked(o)) return false;
+  return canEditSection(o, "production");
 }
 const canWriteInspProblem = (o) => canAddLog(o);
 const canWriteInspFix = (o) => canAddLog(o);
@@ -790,7 +794,7 @@ function vDetail() {
       : `<div class="row-item"${rowStyle}><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
           <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`;
     const warn = lockedShip ? `<div style="margin:0 16px 12px;padding:10px 14px;border-radius:var(--radius);background:var(--bad-soft);color:var(--bad);font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px">
-        <span>⚠️</span><span>发货日期一经勾选，所有内容无法更改！！！</span></div>` : "";
+        <span>⚠️</span><span>发货日期一经勾选，只有管理员能再修改（订单其它内容不受影响）</span></div>` : "";
     return row + warn;
   }).join("");
   // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
@@ -844,7 +848,7 @@ function vDetail() {
       </div>
       ${logsOf("production").filter(f => !["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
     </div>
-    ${dateFieldsProd.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsProd, canEditProd)}</div>` : ""}
+    ${dateFieldsProd.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsProd, canEditShipDate(o))}</div>` : ""}
   </section>
 
   <section class="group">

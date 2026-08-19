@@ -223,14 +223,17 @@ async function call(method, path, token, body) {
   ok((await call("DELETE", `/orders/${o1.id}/logs/cutting/${othersLog.id}`, fT)).status === 200,
     "主管权限能删除任何人的记录");
 
-  // ---- 发货日期锁定：一旦填写，除管理员外任何人(包括主管)都不能再改这单任何内容 ----
+  // ---- 发货日期锁定：一旦填写，只锁这一个字段(除管理员外谁都不能再改)，订单其它内容不受影响 ----
   const lockOrder = await call("POST", "/orders", sT, { season: "SS2027", values: { styleNo: "LOCK-1", styleName: "锁定测试" } });
   ok(lockOrder.status === 200, "创建锁定测试订单");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-01" } })).status === 403, "业务员不能设置发货日期(属于「二、生产明细」)");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { shipDate: "2026-09-01" } })).status === 200, "管理员设置发货日期，把订单锁定(供下面几条锁定测试用)");
-  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { desc: "锁定后想改" } })).status === 403, "发货日期填写后，本单业务员自己也不能再改了");
-  ok((await call("POST", `/orders/${lockOrder.j.id}/logs`, fT, { key: "cutting", text: "主管也改不了" })).status === 403, "发货日期填写后，主管也不能再改这单");
-  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { desc: "管理员改的" } })).status === 200, "管理员仍能修改已锁定的订单");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { desc: "锁定后想改" } })).status === 200, "发货日期锁定不影响本单业务员改「一、订单明细」其它内容");
+  ok((await call("POST", `/orders/${lockOrder.j.id}/logs`, fT, { key: "cutting", text: "主管仍能打卡" })).status === 200, "发货日期锁定不影响主管在此订单打卡");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-05" } })).status === 403, "发货日期锁定后，业务员还是不能再改发货日期");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, fT, { values: { shipDate: "2026-09-05" } })).status === 403, "发货日期锁定后，主管也不能再改发货日期(只有管理员能改)");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { desc: "管理员改的" } })).status === 200, "管理员仍能修改已锁定订单的其它内容");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { shipDate: "2026-09-10" } })).status === 200, "管理员仍能修改已锁定的发货日期本身");
   await call("PATCH", `/users/${liu.id}`, aT, { role: "follower" }); // 测试收尾，把刘敏职位改回去
   await call("DELETE", `/roles/${supRoleK}`, aT); // 清理掉测试用的临时职位，避免影响其它测试文件对职位数量的断言(同一个 npm test 进程里所有测试文件共用一个服务端/数据库)
   // 上面创建的"测试业务员职位"没有人用，直接清理
