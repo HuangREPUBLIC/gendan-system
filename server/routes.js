@@ -208,6 +208,12 @@ function orderPublic(o) {
 function allOrdersPublic() {
   return db.prepare("SELECT * FROM orders").all().map(r => { r.data = JSON.parse(r.data); return orderPublic(r); });
 }
+// 订单列表可见范围：业务员只看自己创建/负责的，下厂员只看自己被指派的；主管/管理员不受限。
+// (导出/员工历史打卡这两处要看全部订单的场景，仍然直接用上面的 allOrdersPublic，不经过这层过滤)
+function visibleOrdersPublic(u) {
+  const rows = db.prepare("SELECT * FROM orders").all().map(r => { r.data = JSON.parse(r.data); return r; });
+  return rows.filter(r => A.canViewOrder(u, r)).map(orderPublic);
+}
 function logFields() {
   const f = getSetting("fields", { order: [], production: [] });
   return [...f.order, ...f.production].filter(x => x.type === "log");
@@ -261,7 +267,7 @@ router.get("/bootstrap", (req, res) => {
     factories: getSetting("factories", { emb: [], prod: [], proc: [] }),
     roles: getSetting("roles", []),
     seasons: getSetting("seasons", []),
-    orders: allOrdersPublic()
+    orders: visibleOrdersPublic(req.user)
   });
 });
 
@@ -445,10 +451,11 @@ router.delete("/seasons/:name", A.adminRequired, (req, res) => {
  * ========================================================= */
 function canCreateOrder(u) { return !!u; }
 
-router.get("/orders", (req, res) => res.json(allOrdersPublic()));
+router.get("/orders", (req, res) => res.json(visibleOrdersPublic(req.user)));
 router.get("/orders/:id", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
+  if (!A.canViewOrder(req.user, o)) return res.status(403).json({ error: "无权查看此订单" });
   res.json(orderPublic(o));
 });
 
@@ -485,8 +492,21 @@ router.patch("/orders/:id", (req, res) => {
   if (!o) return res.status(404).json({ error: "订单不存在" });
   if (!A.canEditBasic(req.user, o)) return res.status(403).json({ error: "无权修改此订单的基本信息" });
   const { season, values } = req.body || {};
-  if (season !== undefined && String(season).trim()) o.season = String(season).trim();
-  if (values && typeof values === "object") o.data.values = Object.assign({}, o.data.values, values);
+  // 季节算"一、订单明细"的内容；values 里每个字段按它所属的板块(order/production)分别校验——
+  // 业务员只能改"一、订单明细"，下厂员只能改"二、生产明细"，主管/管理员不受限
+  if (season !== undefined && String(season).trim()) {
+    if (!A.canEditSection(req.user, o, "order")) return res.status(403).json({ error: "无权修改「一、订单明细」的内容" });
+    o.season = String(season).trim();
+  }
+  if (values && typeof values === "object") {
+    for (const key of Object.keys(values)) {
+      const section = sectionOfKey(key);
+      if (!A.canEditSection(req.user, o, section)) {
+        return res.status(403).json({ error: `无权修改「${section === "order" ? "一、订单明细" : "二、生产明细"}」的内容` });
+      }
+    }
+    o.data.values = Object.assign({}, o.data.values, values);
+  }
   saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -527,7 +547,7 @@ router.patch("/orders/:id/logs/:key/:entryId", (req, res) => {
   const list = listForKey(o, req.params.key);
   const e = list && list.find(x => x.id === req.params.entryId);
   if (!e) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canTouchEntry(req.user, o, e)) return res.status(403).json({ error: "无权修改这条打卡记录" });
+  if (!A.canTouchEntry(req.user, o, e, sectionOfKey(req.params.key))) return res.status(403).json({ error: "无权修改这条打卡记录" });
   const t = String((req.body || {}).text || "").trim();
   const photos = Array.isArray((req.body || {}).photos) ? cleanPhotos((req.body || {}).photos) : (e.photos || []);
   if (!t && !photos.length) return res.status(400).json({ error: "内容和照片不能都为空" });
@@ -541,7 +561,7 @@ router.delete("/orders/:id/logs/:key/:entryId", (req, res) => {
   const list = listForKey(o, req.params.key);
   const e = list && list.find(x => x.id === req.params.entryId);
   if (!e) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canTouchEntry(req.user, o, e)) return res.status(403).json({ error: "无权删除这条打卡记录" });
+  if (!A.canTouchEntry(req.user, o, e, sectionOfKey(req.params.key))) return res.status(403).json({ error: "无权删除这条打卡记录" });
   list.splice(list.indexOf(e), 1); saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });

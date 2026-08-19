@@ -29,14 +29,14 @@ async function call(m, p, t, b) {
   const mainLogBody = { key: "mainLog", text: "主厂新打卡", process: "车缝", workers: "12", estDone: "2026-08-01" };
   ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "mainLog", text: "缺必填项" })).status === 400, "主厂打卡不填生产工序/车工人数/预计下车时间报错");
   ok((await call("POST", `/orders/${o1.id}/logs`, fT, mainLogBody)).status === 200, "本单下厂员在主厂(mainLog)打卡(含必填项)");
-  ok((await call("POST", `/orders/${o1.id}/logs`, sT, Object.assign({}, mainLogBody, { text: "业务员帮着记录" }))).status === 200, "本单业务员也能在主厂(mainLog)打卡");
+  ok((await call("POST", `/orders/${o1.id}/logs`, sT, Object.assign({}, mainLogBody, { text: "业务员想打卡" }))).status === 403, "业务员不能在主厂(mainLog，属于生产明细)打卡");
   ok((await call("POST", `/orders/${o1.id}/logs`, s2T, mainLogBody)).status === 403, "跟本单无关的业务员不能在主厂打卡");
   ok((await call("POST", `/orders/${o1.id}/logs`, f2T, mainLogBody)).status === 403, "跟本单无关的下厂员不能在主厂打卡");
 
-  // ---- 加工点：本单业务员/下厂员都能加/改名，只有管理员能删 ----
+  // ---- 加工点(属于生产明细)：只有本单下厂员能加/改名，业务员不行，只有管理员能删 ----
   const addSub = await call("POST", `/orders/${o1.id}/subs`, fT, { name: "加工点2（临时外发）" });
   ok(addSub.status === 200 && addSub.j.subs.length === 2, "下厂员新增加工点，无需管理员预配置，不用先填工序/人数/预计下车时间");
-  ok((await call("POST", `/orders/${o1.id}/subs`, sT, { name: "业务员加的加工点" })).status === 200, "本单业务员也能加加工点");
+  ok((await call("POST", `/orders/${o1.id}/subs`, sT, { name: "业务员想加加工点" })).status === 403, "业务员不能加加工点(属于生产明细)");
   ok((await call("POST", `/orders/${o1.id}/subs`, s2T, { name: "非本单业务员也能加" })).status === 403, "跟本单无关的业务员不能加加工点");
   ok((await call("POST", `/orders/${o1.id}/subs`, f2T, { name: "非本单下厂员也能加" })).status === 403, "跟本单无关的下厂员不能加加工点");
   const subId = addSub.j.subs[1].id;

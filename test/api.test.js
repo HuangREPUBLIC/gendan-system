@@ -35,13 +35,25 @@ async function call(method, path, token, body) {
   // admin can log
   const al = await call("POST", `/orders/${o1.id}/logs`, aT, { key: "cutting", text: "管理员打卡测试" });
   ok(al.status === 200 && al.j.logs.cutting.some(e => e.text === "管理员打卡测试" && e.byName === "老板"), "管理员打卡并自动记名");
-  // sales(陈晓芳 创建 o1) can update both order-section and production-section progress on 自己的订单
-  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "fabricProg", text: "业务员更新面料" })).status === 200, "业务员更新订单明细进度");
-  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "ironing", text: "业务员也能打卡" })).status === 200, "本单业务员也能在生产明细打卡");
-  // sales edit basic ok; 跟本单无关的下厂员不行
-  ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { fabric: "改过的面料" } })).status === 200, "业务员改自己订单基本信息");
-  ok((await call("PATCH", `/orders/${o1.id}`, fT, { values: { fabric: "x" } })).status === 403, "跟本单无关的下厂员不能改基本信息");
-  ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { fabric: "王建国改的面料" } })).status === 200, "本单负责下厂员能改基本信息");
+  // 业务员(陈晓芳 创建 o1) 只能碰"一、订单明细"，"二、生产明细"不行；下厂员反过来
+  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "fabricProg", text: "业务员更新面料" })).status === 200, "业务员更新订单明细(一)进度");
+  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "ironing", text: "业务员想打卡生产明细" })).status === 403, "业务员不能在生产明细(二)打卡");
+  ok((await call("POST", `/orders/${o1.id}/logs`, wT, { key: "fabricProg", text: "下厂员想打卡订单明细" })).status === 403, "本单负责下厂员不能在订单明细(一)打卡");
+  // sales edit "一、订单明细" ok，改"二、生产明细"不行；下厂员反过来；跟本单无关的下厂员两边都不行
+  ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { desc: "改过的款式描述" } })).status === 200, "业务员改自己订单「一、订单明细」");
+  ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { follower: wang.id } })).status === 403, "业务员不能改「二、生产明细」的内容(比如指定下厂员)");
+  ok((await call("PATCH", `/orders/${o1.id}`, fT, { values: { desc: "x" } })).status === 403, "跟本单无关的下厂员不能改基本信息");
+  ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { desc: "王建国想改订单明细" } })).status === 403, "本单负责下厂员不能改「一、订单明细」");
+  ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { follower: wang.id } })).status === 200, "本单负责下厂员能改「二、生产明细」的内容");
+
+  // 订单列表可见范围：业务员/下厂员只看跟自己相关的，主管/管理员不受限
+  const sList = (await call("GET", "/orders", sT)).j;
+  ok(sList.every(o => o.values.sales === chen.id || o.createdBy === chen.id), "业务员的订单列表里都是自己相关的订单");
+  const fList = (await call("GET", "/orders", fT)).j;
+  ok(!fList.some(o => o.id === o1.id), "跟 o1 无关的下厂员，订单列表里看不到 o1");
+  ok((await call("GET", `/orders/${o1.id}`, fT)).status === 403, "跟本单无关的下厂员不能直接查看这单详情");
+  ok((await call("GET", `/orders/${o1.id}`, sT)).status === 200, "本单业务员能查看订单详情");
+  ok((await call("GET", "/orders", aT)).j.length === (await call("GET", "/bootstrap", aT)).j.orders.length, "管理员的订单列表不受限，跟 bootstrap 全量一致");
 
   // create order: 任意登录用户仍可建单(建单后自己就是负责人)
   ok((await call("POST", "/orders", fT, { season: "SS2027", values: { styleNo: "X" } })).status === 200, "下厂员能建单");
@@ -214,10 +226,11 @@ async function call(method, path, token, body) {
   // ---- 发货日期锁定：一旦填写，除管理员外任何人(包括主管)都不能再改这单任何内容 ----
   const lockOrder = await call("POST", "/orders", sT, { season: "SS2027", values: { styleNo: "LOCK-1", styleName: "锁定测试" } });
   ok(lockOrder.status === 200, "创建锁定测试订单");
-  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-01" } })).status === 200, "业务员本人可以填发货日期");
-  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { fabric: "锁定后想改" } })).status === 403, "发货日期填写后，本单业务员自己也不能再改了");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-01" } })).status === 403, "业务员不能设置发货日期(属于「二、生产明细」)");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { shipDate: "2026-09-01" } })).status === 200, "管理员设置发货日期，把订单锁定(供下面几条锁定测试用)");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { desc: "锁定后想改" } })).status === 403, "发货日期填写后，本单业务员自己也不能再改了");
   ok((await call("POST", `/orders/${lockOrder.j.id}/logs`, fT, { key: "cutting", text: "主管也改不了" })).status === 403, "发货日期填写后，主管也不能再改这单");
-  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { fabric: "管理员改的" } })).status === 200, "管理员仍能修改已锁定的订单");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { desc: "管理员改的" } })).status === 200, "管理员仍能修改已锁定的订单");
   await call("PATCH", `/users/${liu.id}`, aT, { role: "follower" }); // 测试收尾，把刘敏职位改回去
   await call("DELETE", `/roles/${supRoleK}`, aT); // 清理掉测试用的临时职位，避免影响其它测试文件对职位数量的断言(同一个 npm test 进程里所有测试文件共用一个服务端/数据库)
   // 上面创建的"测试业务员职位"没有人用，直接清理

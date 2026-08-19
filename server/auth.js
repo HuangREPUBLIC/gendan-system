@@ -106,39 +106,45 @@ function isOwnByFollower(u, order) {
   const v = (order.data && order.data.values) || {};
   return v.follower === u.id;
 }
-// 能否编辑订单基本信息
+// 能否看到这单(订单列表/详情读取用)：业务员只看自己创建/负责的，下厂员只看自己被指派的；
+// 主管/管理员不受限。跟 canEditSection 不同的是不受发货锁定影响——已发货的单本人仍要看得到，
+// 只是不能再改。
+function canViewOrder(u, order) {
+  if (!u) return false;
+  if (isAdmin(u) || isSupervisor(u)) return true;
+  const t = templateOf(u);
+  if (t === "sales") return isOwnBySales(u, order);
+  if (t === "follower") return isOwnByFollower(u, order);
+  return false;
+}
+// 能否编辑订单某个板块："一、订单明细"(order)只有业务员(自己的单)能改，
+// "二、生产明细"(production，含"生产安排字段"/下厂员指定、发货日期)只有下厂员(自己负责的单)能改；
+// 主管/管理员两块都不受限。section 传 undefined 时表示"不分板块"，只看是不是本单相关人员。
+function canEditSection(u, order, section) {
+  if (!u) return false;
+  if (isAdmin(u)) return true;
+  if (shipLocked(order)) return false;
+  if (isSupervisor(u)) return true;
+  const t = templateOf(u);
+  if (t === "sales") return (section === undefined || section === "order") && isOwnBySales(u, order);
+  if (t === "follower") return (section === undefined || section === "production") && isOwnByFollower(u, order);
+  return false;
+}
+// 能否编辑订单基本信息(不分板块，粗粒度判断"有没有编辑入口")
 function canEditBasic(u, order) {
-  if (!u) return false;
-  if (isAdmin(u)) return true;
-  if (shipLocked(order)) return false;
-  if (isSupervisor(u)) return true;
-  const t = templateOf(u);
-  if (t === "sales") return isOwnBySales(u, order);
-  if (t === "follower") return isOwnByFollower(u, order);
-  return false;
+  return canEditSection(u, order, "order") || canEditSection(u, order, "production");
 }
-// 能否在某板块打卡/添加内容：业务员在自己订单可以，下厂员在自己负责的订单可以
-function canAddLog(u, order, section) {
-  if (!u) return false;
-  if (isAdmin(u)) return true;
-  if (shipLocked(order)) return false;
-  if (isSupervisor(u)) return true;
-  const t = templateOf(u);
-  if (t === "sales") return isOwnBySales(u, order);
-  if (t === "follower") return isOwnByFollower(u, order);
-  return false;
-}
-// 能否修改/删除某条记录：管理员/主管；本单负责的业务员或下厂员；或者自己创建的记录
-function canTouchEntry(u, order, entry) {
+// 能否在某板块打卡/添加内容：业务员只能在"一、订单明细"板块，下厂员只能在"二、生产明细"板块；
+// section 不传时(比如验货问题/跟单小结，不分一二)按老逻辑只看是不是本单相关人员
+const canAddLog = canEditSection;
+// 能否修改/删除某条记录：管理员/主管；本板块对应的业务员或下厂员；或者自己创建的记录(不分板块)
+function canTouchEntry(u, order, entry, section) {
   if (!u) return false;
   if (isAdmin(u)) return true;
   if (shipLocked(order)) return false;
   if (isSupervisor(u)) return true;
   if (entry && entry.by === u.id) return true;
-  const t = templateOf(u);
-  if (t === "sales") return isOwnBySales(u, order);
-  if (t === "follower") return isOwnByFollower(u, order);
-  return false;
+  return canEditSection(u, order, section);
 }
 
 // 验货「发现问题」「整改情况」：跟其它内容一样，按职位权限模板走
@@ -148,6 +154,6 @@ const canWriteInspFix = (u, order) => canAddLog(u, order);
 module.exports = {
   hashPassword, verifyPassword, signToken, userPublic, userById,
   authRequired, adminRequired, isAdmin, isSupervisor, shipLocked,
-  canEditBasic, canAddLog, canTouchEntry,
+  canEditBasic, canEditSection, canAddLog, canTouchEntry, canViewOrder,
   roleTemplate, templateOf, roleLabel, canWriteInspProblem, canWriteInspFix
 };

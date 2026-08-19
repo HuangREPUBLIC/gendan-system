@@ -154,34 +154,28 @@ function isOwnByFollower(o) {
   return o.values.follower === u.id;
 }
 function shipLocked(o) { return !!(o && o.values && o.values.shipDate); }
-function canEditBasic(o) {
+// 按板块判断编辑权限："一、订单明细"(order)只有业务员(自己的单)能改，
+// "二、生产明细"(production)只有下厂员(自己负责的单)能改；主管/管理员两块都不受限。
+// section 传 undefined 表示不分板块(验货问题/跟单小结这类)，只看是不是本单相关人员。
+function canEditSection(o, section) {
   const u = me(); if (!u) return false;
   if (isAdmin()) return true;
   if (shipLocked(o)) return false;
   if (isSupervisor()) return true;
-  if (u.template === "sales") return isOwnBySales(o);
-  if (u.template === "follower") return isOwnByFollower(o);
+  if (u.template === "sales") return (section === undefined || section === "order") && isOwnBySales(o);
+  if (u.template === "follower") return (section === undefined || section === "production") && isOwnByFollower(o);
   return false;
 }
-function canAddLog(o, section) {
-  const u = me(); if (!u) return false;
-  if (isAdmin()) return true;
-  if (shipLocked(o)) return false;
-  if (isSupervisor()) return true;
-  if (u.template === "sales") return isOwnBySales(o);
-  if (u.template === "follower") return isOwnByFollower(o);
-  return false;
-}
-const canTouchEntry = (o, e) => {
+function canEditBasic(o) { return canEditSection(o, "order") || canEditSection(o, "production"); }
+const canAddLog = canEditSection;
+function canTouchEntry(o, e, section) {
   const u = me(); if (!u) return false;
   if (isAdmin()) return true;
   if (shipLocked(o)) return false;
   if (isSupervisor()) return true;
   if (e && e.by === u.id) return true;
-  if (u.template === "sales") return isOwnBySales(o);
-  if (u.template === "follower") return isOwnByFollower(o);
-  return false;
-};
+  return canEditSection(o, section);
+}
 const canWriteInspProblem = (o) => canAddLog(o);
 const canWriteInspFix = (o) => canAddLog(o);
 
@@ -629,11 +623,13 @@ function vOrders() {
   const opt = (arr, cur) => arr.map(([v, t]) =>
     `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(t)}</option>`).join("");
   const allFactories = [...new Set([...state.factories.prod, ...state.factories.fabric, ...state.factories.emb])];
+  // 业务员自己看到的订单本来就都是自己的，"全部业务员"筛选对他没意义，不显示；下厂员同理
+  const myTemplate = (me() || {}).template;
   return `<section class="group">
     <div class="card"><div class="filters">
       <select class="in" onchange="A.setF('season',this.value)"><option value="">全部季节</option>${opt(seasonOptions("").map(s => [s, s]), filt.season)}</select>
-      <select class="in" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]), filt.sales)}</select>
-      <select class="in" onchange="A.setF('follower',this.value)"><option value="">全部下厂员</option>${opt(state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]), filt.follower)}</select>
+      ${myTemplate === "sales" ? "" : `<select class="in" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]), filt.sales)}</select>`}
+      ${myTemplate === "follower" ? "" : `<select class="in" onchange="A.setF('follower',this.value)"><option value="">全部下厂员</option>${opt(state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]), filt.follower)}</select>`}
       <input class="in" id="flt-kw" placeholder="搜货号 / 款式名" value="${esc(filt.kw)}" oninput="A.setFKw(this.value)">
       <select class="in" onchange="A.setF('factoryKw',this.value)"><option value="">全部工厂</option>${opt(allFactories.map(x => [x, x]), filt.factoryKw)}</select>
     </div></div></section>
@@ -708,14 +704,14 @@ function importPreviewHtml() {
 
 /* ---------- 订单详情 ---------- */
 // 一条打卡记录的展示（改/删链接 + 文字 + 照片），主厂/加工点/普通进度字段共用
-function logEntriesHtml(list, o, key) {
+function logEntriesHtml(list, o, key, section) {
   const entries = (list || []).slice().sort((a, b) => b.t - a.t);
   if (!entries.length) return `<div class="empty" style="padding:8px 0">暂无打卡记录</div>`;
   const isMainSub = key === "mainLog" || key.startsWith("sub:");
   return `<ul class="log">${entries.map(e => `<li>
     <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>
-      <span class="act-row">${canTouchEntry(o, e) ? `<button type="button" class="act-btn" onclick="A.editLog('${o.id}','${key}','${e.id}')">改</button>` : ""}
-      ${canTouchEntry(o, e) ? `<button type="button" class="act-btn danger" onclick="A.delLog('${o.id}','${key}','${e.id}')">删</button>` : ""}</span></div>
+      <span class="act-row">${canTouchEntry(o, e, section) ? `<button type="button" class="act-btn" onclick="A.editLog('${o.id}','${key}','${e.id}')">改</button>` : ""}
+      ${canTouchEntry(o, e, section) ? `<button type="button" class="act-btn danger" onclick="A.delLog('${o.id}','${key}','${e.id}')">删</button>` : ""}</span></div>
     ${isMainSub && e.process ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">
       生产工序：${esc(e.process)} · 车工人数：${esc(e.workers)} · 预计下车：${esc(fmtDate(e.estDone))}</div>` : ""}
     ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>`;
@@ -730,7 +726,7 @@ function mainSubAddBoxHtml(oid, key, placeholder) {
     ${photoPicker("log:" + key)}
     <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${oid}','${key}')">提交打卡</button></div></div>`;
 }
-function logFieldHtml(o, f, list, addKey, canAdd) {
+function logFieldHtml(o, f, list, addKey, canAdd, section) {
   return `<div class="logfield">
     <div class="lf-head"><span><span class="lf-dot"></span>${esc(f.label)}</span><span class="cnt">${(list || []).length} 条</span>
       ${canAdd ? `<button class="btn mini right" onclick="A.toggleAdd('${addKey}')">＋ 打卡</button>` : ""}</div>
@@ -738,9 +734,9 @@ function logFieldHtml(o, f, list, addKey, canAdd) {
       <textarea class="in" id="txt-${addKey}" placeholder="填写当前进度情况，可详细描述…"></textarea>
       ${photoPicker("log:" + addKey)}
       <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','${addKey}')">提交打卡</button></div></div>` : ""}
-    ${logEntriesHtml(list, o, addKey)}</div>`;
+    ${logEntriesHtml(list, o, addKey, section)}</div>`;
 }
-// 一个动态"加工点"卡片：可编辑(名称+工序/人数/预计下车时间)、可打卡、管理员可删除
+// 一个动态"加工点"卡片：可编辑(名称+工序/人数/预计下车时间)、可打卡、管理员可删除——始终属于"二、生产明细"
 function subCardHtml(o, s, canProdLog) {
   const key = "sub:" + s.id;
   return `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
@@ -751,7 +747,7 @@ function subCardHtml(o, s, canProdLog) {
       ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('${key}')">＋ 打卡</button>` : ""}
     </div>
     ${canProdLog ? mainSubAddBoxHtml(o.id, key, "该加工点的进度情况（补充说明，选填）…") : ""}
-    ${logEntriesHtml(s.log, o, key)}</div>`;
+    ${logEntriesHtml(s.log, o, key, "production")}</div>`;
 }
 // 验货：一条"发现问题/整改情况"的展示（两个字段各自独立可编辑）
 function inspItemHtml(o, g, it, canInsp, canFix) {
@@ -778,15 +774,17 @@ function vDetail() {
   if (!o) return `<div class="card"><div class="empty">订单不存在</div></div>`;
   const scalars = s => state.fields[s].filter(f => f.type !== "log");
   const logsOf = s => state.fields[s].filter(f => f.type === "log");
-  const canB = canEditBasic(o), canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
+  // "一、订单明细"只有业务员(自己的单)能改，"二、生产明细"只有下厂员(自己负责的单)能改；主管/管理员两块都不受限
+  const canEditOrd = canEditSection(o, "order"), canEditProd = canEditSection(o, "production");
+  const canB = canEditOrd || canEditProd, canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
   const canInsp = canWriteInspProblem(o), canFix = canWriteInspFix(o);
   // 订单交期/发货日期这两个字段单独摘出来，有编辑权限时直接在详情页点选就改，不用进编辑页；
   // 其它日期类字段(比如预计下车时间)是普通字段，跟着所属的分组(服装工厂旁边)走正常编辑流程
   const isQuickDateField = f => f.k === "deadline" || f.k === "shipDate";
-  const kv = fs => fs.map(f => {
+  const kv = (fs, canEditThis) => fs.map(f => {
     const lockedShip = f.k === "shipDate" && shipLocked(o);
     const rowStyle = lockedShip ? ` style="border-bottom:0"` : "";
-    const row = isQuickDateField(f) && canB
+    const row = isQuickDateField(f) && canEditThis
       ? `<div class="row-item"${rowStyle}><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
           <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
       : `<div class="row-item"${rowStyle}><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
@@ -818,20 +816,20 @@ function vDetail() {
   <section class="group">
     <div class="group-title"><span class="cat-title">一、订单明细</span>${canB ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}</div>
     <div class="card">${editingBasic && canB
-      ? `<label class="field"><span>订单季节</span>${seasonSelectHtml(o.season)}</label>${editForm("order")}
-         <div class="group-title" style="padding-top:12px">生产安排字段</div>${editForm("production")}
+      ? `${canEditOrd ? `<label class="field"><span>订单季节</span>${seasonSelectHtml(o.season)}</label>${editForm("order")}` : ""}
+         ${canEditProd ? `<div class="group-title" style="padding-top:12px">生产安排字段</div>${editForm("production")}` : ""}
          <div class="btn-row"><button class="btn" onclick="A.saveBasic('${o.id}')">保存修改</button></div>`
-      : kv(orderKvFields)}</div>
-    ${dateFieldsOrder.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsOrder)}</div>` : ""}
-    <div class="card" style="margin-top:14px">${logsOf("order").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canOrdLog)).join("")}</div>
+      : kv(orderKvFields, canEditOrd)}</div>
+    ${dateFieldsOrder.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsOrder, canEditOrd)}</div>` : ""}
+    <div class="card" style="margin-top:14px">${logsOf("order").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canOrdLog, "order")).join("")}</div>
   </section>
 
   <section class="group">
     <div class="group-title"><span class="cat-title">二、生产明细</span>
       <span style="margin-left:8px;font-size:12.5px;color:var(--ink-2)">${o.values.follower ? `负责人 ${esc(uname(o.values.follower))}` : "未指定下厂员"}</span></div>
-    <div class="card">${kv(topProdScalars)}</div>
+    <div class="card">${kv(topProdScalars, canEditProd)}</div>
     <div class="card" style="margin-top:14px">
-      ${logsOf("production").filter(f => ["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog)).join("")}
+      ${logsOf("production").filter(f => ["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
       <div class="prodgroup-title"><span><span class="lf-dot"></span>生产进度</span></div>
       <div class="logfield" style="padding-top:0">
         <div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
@@ -839,14 +837,14 @@ function vDetail() {
             <span class="tag hl">${esc(o.values.factory) || "未指定"}</span>
             ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('mainLog')">＋ 打卡</button>` : ""}</div>
           ${canProdLog ? mainSubAddBoxHtml(o.id, "mainLog", "本厂生产进度（补充说明，选填）…") : ""}
-          ${logEntriesHtml(o.mainLog, o, "mainLog")}</div>
+          ${logEntriesHtml(o.mainLog, o, "mainLog", "production")}</div>
         ${(o.subs || []).map(s => subCardHtml(o, s, canProdLog)).join("")}
         ${canProdLog ? `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
           <button class="btn mini ghost" onclick="A.addSubPrompt('${o.id}')">＋ 添加加工点</button></div>` : ""}
       </div>
-      ${logsOf("production").filter(f => !["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog)).join("")}
+      ${logsOf("production").filter(f => !["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
     </div>
-    ${dateFieldsProd.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsProd)}</div>` : ""}
+    ${dateFieldsProd.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsProd, canEditProd)}</div>` : ""}
   </section>
 
   <section class="group">
