@@ -208,7 +208,7 @@ async function apiAs(phone, method, p, body) {
   const todayIso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   ok(doc.getElementById("nf-deadline--label").textContent === todayCn, "新建订单日期默认当天且显示中文");
   ok(doc.getElementById("nf-deadline").value === todayIso, "底层日期值就是本地当天（不受 UTC 时差影响）");
-  ok(doc.getElementById("nf-shipDate--label").textContent === todayCn, "发货日期同样默认当天");
+  ok(doc.getElementById("nf-shipDate--label").textContent === "选择日期" && doc.getElementById("nf-shipDate").value === "", "发货日期新建时保持空白(填了会被当成已发货锁死订单)");
   ok(!!doc.getElementById("pe-img") && app().includes("拍照") && app().includes("相册"), "款式图是多图相册选择器，且拍照/相册是两个独立入口(不受 multiple 属性影响拍照选项)");
   ok(doc.querySelector("#imp-file--name") && doc.querySelector("#imp-file--name").textContent.includes("未选择文件"), "CSV 文件控件仍显示中文");
   ok(!/Choose File|No file chosen/i.test(app()), "没有英文文件选择文案");

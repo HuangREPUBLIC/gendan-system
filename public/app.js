@@ -658,8 +658,9 @@ function vOrders() {
 function vNew() {
   const scalars = s => state.fields[s].filter(f => f.type !== "log");
   if (!photoDraft.img) photoDraft.img = [];
-  // 新建时日期默认当天，业务员默认自己
-  const defVal = f => f.type === "date" ? todayStr()
+  // 新建时日期默认当天，业务员默认自己——但"发货日期"不能默认今天，
+  // 否则订单一创建就会被当成"已发货"锁死(shipLocked)，业务员自己都编辑不了
+  const defVal = f => (f.type === "date" && f.k !== "shipDate") ? todayStr()
     : (f.k === "sales" && me().template === "sales" ? me().id : "");
   return `<section class="group">
     <div class="group-title">订单明细</div>
