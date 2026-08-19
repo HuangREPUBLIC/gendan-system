@@ -504,6 +504,10 @@ router.patch("/orders/:id", (req, res) => {
       if (key === "shipDate" && A.shipLocked(o) && !A.isAdmin(req.user)) {
         return res.status(403).json({ error: "发货日期一经填写，只有管理员能再修改" });
       }
+      // 指定下厂员是谁不算下厂员自己能改的内容(建单时随便指定不受此限)：只有主管/管理员能改
+      if (key === "follower" && !A.isAdmin(req.user) && !A.isSupervisor(req.user)) {
+        return res.status(403).json({ error: "无权指定下厂员，只有主管/管理员能修改" });
+      }
       const section = sectionOfKey(key);
       if (!A.canEditSection(req.user, o, section)) {
         return res.status(403).json({ error: `无权修改「${section === "order" ? "一、订单明细" : "二、生产明细"}」的内容` });

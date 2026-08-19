@@ -245,7 +245,7 @@ function dateFieldHtml(id, val, extraOnChange) {
   return `<div class="datefield">
     <button type="button" class="in date-btn ${val ? "" : "empty"}" id="${id}--label" tabindex="-1"
       >${val ? esc(fmtDate(val)) : "选择日期"}</button>
-    <input type="date" id="${id}" class="date-native" value="${esc(val || "")}"
+    <input type="date" id="${id}" class="date-native" value="${esc(val || "")}" autocomplete="off"
       onchange="${extraOnChange ? extraOnChange + ";" : ""}A.syncDateLabel('${id}')" onclick="A.openDate(this)" onfocus="A.openDate(this)"></div>`;
 }
 // 文件选择：隐藏原生控件（它显示英文 Choose File），用中文按钮代替
@@ -670,7 +670,9 @@ function vNew() {
     </div></section>
   <section class="group">
     <div class="group-title">生产安排（指定负责打卡的下厂员）</div>
-    <div class="card"><div class="grid2">${scalars("production").map(f => fieldRow(f, defVal(f))).join("")}</div></div>
+    <div class="card"><div class="grid2">${scalars("production").map(f => fieldRow(f, defVal(f))).join("")}</div>
+      <div style="margin:12px 0 0;padding:10px 14px;border-radius:var(--radius);background:var(--bad-soft);color:var(--bad);font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px">
+        <span>⚠️</span><span>发货日期一旦选择，不可以再次修改</span></div></div>
     <div class="btn-row" style="padding-left:0;padding-right:0">
       <button class="btn block" onclick="A.createOrder()">保存订单</button></div>
   </section>
@@ -781,6 +783,8 @@ function vDetail() {
   // "一、订单明细"只有业务员(自己的单)能改，"二、生产明细"只有下厂员(自己负责的单)能改；主管/管理员两块都不受限
   const canEditOrd = canEditSection(o, "order"), canEditProd = canEditSection(o, "production");
   const canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
+  // "下厂员"指定谁负责，不算下厂员自己能改的内容——只有主管/管理员能改(业务员本来也不能碰二)
+  const canEditFollower = isAdmin() || isSupervisor();
   const canInsp = canWriteInspProblem(o), canFix = canWriteInspFix(o);
   // 订单交期/发货日期这两个字段单独摘出来，有编辑权限时直接在详情页点选就改，不用进编辑页；
   // 其它日期类字段(比如预计下车时间)是普通字段，跟着所属的分组(服装工厂旁边)走正常编辑流程
@@ -829,11 +833,11 @@ function vDetail() {
   </section>
 
   <section class="group">
-    <div class="group-title"><span class="cat-title">二、生产明细</span>${canEditProd ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}
+    <div class="group-title"><span class="cat-title">二、生产明细</span>${canEditFollower ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}
       <span style="margin-left:8px;font-size:12.5px;color:var(--ink-2)">${o.values.follower ? `负责人 ${esc(uname(o.values.follower))}` : "未指定下厂员"}</span></div>
-    <div class="card">${editingBasic && canEditProd
+    <div class="card">${editingBasic && canEditFollower
       ? `${editForm("production")}<div class="btn-row"><button class="btn" onclick="A.saveBasic('${o.id}')">保存修改</button></div>`
-      : kv(topProdScalars, canEditProd)}</div>
+      : kv(topProdScalars, canEditFollower)}</div>
     <div class="card" style="margin-top:14px">
       ${logsOf("production").filter(f => ["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
       <div class="prodgroup-title"><span><span class="lf-dot"></span>生产进度</span></div>
