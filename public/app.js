@@ -780,21 +780,22 @@ function vDetail() {
   const logsOf = s => state.fields[s].filter(f => f.type === "log");
   // "一、订单明细"只有业务员(自己的单)能改，"二、生产明细"只有下厂员(自己负责的单)能改；主管/管理员两块都不受限
   const canEditOrd = canEditSection(o, "order"), canEditProd = canEditSection(o, "production");
-  const canB = canEditOrd || canEditProd, canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
+  const canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
   const canInsp = canWriteInspProblem(o), canFix = canWriteInspFix(o);
   // 订单交期/发货日期这两个字段单独摘出来，有编辑权限时直接在详情页点选就改，不用进编辑页；
   // 其它日期类字段(比如预计下车时间)是普通字段，跟着所属的分组(服装工厂旁边)走正常编辑流程
   const isQuickDateField = f => f.k === "deadline" || f.k === "shipDate";
   const kv = (fs, canEditThis) => fs.map(f => {
-    const lockedShip = f.k === "shipDate" && shipLocked(o);
-    const rowStyle = lockedShip ? ` style="border-bottom:0"` : "";
+    const isShipDateRow = f.k === "shipDate";
+    const rowStyle = isShipDateRow ? ` style="border-bottom:0"` : "";
     const row = isQuickDateField(f) && canEditThis
       ? `<div class="row-item"${rowStyle}><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
           <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
       : `<div class="row-item"${rowStyle}><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
           <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`;
-    const warn = lockedShip ? `<div style="margin:0 16px 12px;padding:10px 14px;border-radius:var(--radius);background:var(--bad-soft);color:var(--bad);font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px">
-        <span>⚠️</span><span>发货日期一经勾选，只有管理员能再修改（订单其它内容不受影响）</span></div>` : "";
+    // 默认就提示，不用等选完发货日期才出现——避免有人不知道这个限制就先选了
+    const warn = isShipDateRow ? `<div style="margin:0 16px 12px;padding:10px 14px;border-radius:var(--radius);background:var(--bad-soft);color:var(--bad);font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px">
+        <span>⚠️</span><span>发货日期一旦选择，不可以再次修改</span></div>` : "";
     return row + warn;
   }).join("");
   // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
@@ -818,10 +819,9 @@ function vDetail() {
     </div></div></section>
 
   <section class="group">
-    <div class="group-title"><span class="cat-title">一、订单明细</span>${canB ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}</div>
-    <div class="card">${editingBasic && canB
-      ? `${canEditOrd ? `<label class="field"><span>订单季节</span>${seasonSelectHtml(o.season)}</label>${editForm("order")}` : ""}
-         ${canEditProd ? `<div class="group-title" style="padding-top:12px">生产安排字段</div>${editForm("production")}` : ""}
+    <div class="group-title"><span class="cat-title">一、订单明细</span>${canEditOrd ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}</div>
+    <div class="card">${editingBasic && canEditOrd
+      ? `<label class="field"><span>订单季节</span>${seasonSelectHtml(o.season)}</label>${editForm("order")}
          <div class="btn-row"><button class="btn" onclick="A.saveBasic('${o.id}')">保存修改</button></div>`
       : kv(orderKvFields, canEditOrd)}</div>
     ${dateFieldsOrder.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsOrder, canEditOrd)}</div>` : ""}
@@ -829,9 +829,11 @@ function vDetail() {
   </section>
 
   <section class="group">
-    <div class="group-title"><span class="cat-title">二、生产明细</span>
+    <div class="group-title"><span class="cat-title">二、生产明细</span>${canEditProd ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}
       <span style="margin-left:8px;font-size:12.5px;color:var(--ink-2)">${o.values.follower ? `负责人 ${esc(uname(o.values.follower))}` : "未指定下厂员"}</span></div>
-    <div class="card">${kv(topProdScalars, canEditProd)}</div>
+    <div class="card">${editingBasic && canEditProd
+      ? `${editForm("production")}<div class="btn-row"><button class="btn" onclick="A.saveBasic('${o.id}')">保存修改</button></div>`
+      : kv(topProdScalars, canEditProd)}</div>
     <div class="card" style="margin-top:14px">
       ${logsOf("production").filter(f => ["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
       <div class="prodgroup-title"><span><span class="lf-dot"></span>生产进度</span></div>
