@@ -233,7 +233,12 @@ async function call(method, path, token, body) {
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { desc: "锁定后想改" } })).status === 200, "发货日期锁定不影响本单业务员改「一、订单明细」其它内容");
   ok((await call("POST", `/orders/${lockOrder.j.id}/logs`, fT, { key: "cutting", text: "主管仍能打卡" })).status === 200, "发货日期锁定不影响主管在此订单打卡");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-05" } })).status === 403, "发货日期锁定后，业务员还是不能再改发货日期");
-  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, fT, { values: { shipDate: "2026-09-05" } })).status === 403, "发货日期锁定后，主管也不能再改发货日期(只有管理员能改)");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "" } })).status === 403, "发货日期锁定后，业务员不能清空发货日期(只有主管/管理员能清空/改)");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, fT, { values: { shipDate: "2026-09-06" } })).status === 200, "发货日期锁定后，主管能直接改成新日期(避免误触)");
+  ok((await call("GET", `/orders/${lockOrder.j.id}`, sT)).j.values.shipDate === "2026-09-06", "主管改的新日期确实生效了");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, fT, { values: { shipDate: "" } })).status === 200, "主管也能把它清空撤销");
+  ok((await call("GET", `/orders/${lockOrder.j.id}`, sT)).j.values.shipDate === "", "清空后发货日期确实是空的");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-08" } })).status === 200, "清空后重新解锁，业务员能再次设置发货日期");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { desc: "管理员改的" } })).status === 200, "管理员仍能修改已锁定订单的其它内容");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { shipDate: "2026-09-10" } })).status === 200, "管理员仍能修改已锁定的发货日期本身");
   await call("PATCH", `/users/${liu.id}`, aT, { role: "follower" }); // 测试收尾，把刘敏职位改回去

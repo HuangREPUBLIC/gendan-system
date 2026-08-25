@@ -19,6 +19,8 @@ let editingBasic = false, editingFollower = false, importPreview = null, importR
 let showWelcome = false;   // 登录成功后短暂展示的欢迎界面（logo/公司名称/跟单系统）
 const expandedLogGroups = new Set();   // 打卡记录里手动点开"展开全部"的订单(orderId)
 let filt = { season: "", sales: "", follower: "", kw: "", factoryKw: "" };
+let adminUserFilt = { kw: "", page: 1 };   // 管理后台「员工账号」表的搜索/分页
+const ADMIN_USERS_PAGE_SIZE = 10;
 let modalState = null;
 let deferredInstall = null;   // 安卓/桌面 Chrome 的原生安装事件
 // 是否已经是「装到主屏后打开」的状态
@@ -176,8 +178,9 @@ function canTouchEntry(o, e, section) {
 }
 // 发货日期字段本身能不能改：填过之后除管理员外谁都不能再改；没填过时只要是本单相关人员
 // (业务员/下厂员/主管/管理员)都能设置，不分一二板块
+// 发货日期一旦填写就锁定，只有管理员/主管能再改(含改成新日期、清空撤销)；业务员/下厂员不行
 function canEditShipDate(o) {
-  if (isAdmin()) return true;
+  if (isAdmin() || isSupervisor()) return true;
   if (shipLocked(o)) return false;
   return canEditBasic(o);
 }
@@ -793,9 +796,13 @@ function vDetail() {
   const kv = (fs, canEditThis) => fs.map(f => {
     const isShipDateRow = f.k === "shipDate";
     const rowStyle = isShipDateRow ? ` style="border-bottom:0"` : "";
+    // 发货日期已锁定、当前用户又能改(管理员/主管)时，输入框旁边加个"清空"按钮——
+    // 撤销误填比重新点开日期选择器改成空值更直接，避免误触
+    const showClearBtn = isShipDateRow && canEditThis && shipLocked(o);
+    const clearBtn = showClearBtn ? `<button class="btn mini ghost" onclick="A.clearShipDate('${o.id}')">清空</button>` : "";
     const row = isQuickDateField(f) && canEditThis
       ? `<div class="row-item"${rowStyle}><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
-          <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
+          <div class="row-value" style="display:flex;align-items:center;gap:10px">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}${clearBtn}</div></div>`
       : `<div class="row-item"${rowStyle}><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
           <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`;
     // 默认就提示，不用等选完发货日期才出现——避免有人不知道这个限制就先选了
@@ -999,17 +1006,34 @@ function vAdmin() {
     ? `<span class="tag role">管理员</span>`
     : `<select class="in" style="width:auto;min-height:34px;padding:4px 30px 4px 10px;font-size:14px" onchange="A.changeRole('${u.id}',this.value)">
         ${state.roles.map(r => `<option value="${esc(r.k)}" ${u.role === r.k ? "selected" : ""}>${esc(r.label)}</option>`).join("")}</select>`;
+  const kw = adminUserFilt.kw.trim().toLowerCase();
+  const allStaff = state.users.filter(u => u.role !== "admin");
+  const matched = kw ? allStaff.filter(u => u.name.toLowerCase().includes(kw)) : allStaff;
+  const totalPages = Math.max(1, Math.ceil(matched.length / ADMIN_USERS_PAGE_SIZE));
+  if (adminUserFilt.page > totalPages) adminUserFilt.page = totalPages;
+  if (adminUserFilt.page < 1) adminUserFilt.page = 1;
+  const pageStart = (adminUserFilt.page - 1) * ADMIN_USERS_PAGE_SIZE;
+  const pageStaff = matched.slice(pageStart, pageStart + ADMIN_USERS_PAGE_SIZE);
   return `<section class="group">
-    <div class="group-title">员工账号</div>
-    <div class="card"><div class="tbl-wrap"><table class="tbl">
+    <div class="group-title">员工账号 · 共 ${allStaff.length} 人</div>
+    <div class="card"><div class="card-pad" style="padding-bottom:0">
+      <input class="in" id="admin-user-kw" placeholder="搜索姓名" value="${esc(adminUserFilt.kw)}" oninput="A.setAdminUserKw(this.value)">
+    </div><div class="tbl-wrap"><table class="tbl">
       <tr><th>姓名</th><th>手机号</th><th>职位</th><th>操作</th></tr>
-      ${state.users.filter(u => u.role !== "admin").map(u => `<tr>
+      ${pageStaff.map(u => `<tr>
         <td style="white-space:nowrap">${esc(u.name)}${u.id === me().id ? ` <span class="tag">我</span>` : ""}</td>
         <td class="num">${esc(u.phone)}</td><td>${roleCell(u)}</td>
         <td style="white-space:nowrap"><button class="btn mini ghost" onclick="A.viewStaffLogs('${u.id}')">查看打卡</button>${
           u.role === "admin" ? "" : ` <button class="btn mini ghost" onclick="A.resetUserPw('${u.id}')">重置密码</button>
-          <button class="btn mini danger ghost" onclick="A.deleteUser('${u.id}')">删除</button>`}</td></tr>`).join("")}
-    </table></div></div>
+          <button class="btn mini danger ghost" onclick="A.deleteUser('${u.id}')">删除</button>`}</td></tr>`).join("")
+        || `<tr><td colspan="4"><div class="empty">没有符合条件的员工</div></td></tr>`}
+    </table></div>
+    ${totalPages > 1 ? `<div class="card-pad" style="display:flex;align-items:center;justify-content:center;gap:14px">
+      <button class="btn mini ghost" ${adminUserFilt.page <= 1 ? "disabled" : ""} onclick="A.setAdminUserPage(${adminUserFilt.page - 1})">‹ 上一页</button>
+      <span class="row-sub num">第 ${adminUserFilt.page} / ${totalPages} 页</span>
+      <button class="btn mini ghost" ${adminUserFilt.page >= totalPages ? "disabled" : ""} onclick="A.setAdminUserPage(${adminUserFilt.page + 1})">下一页 ›</button>
+    </div>` : ""}
+    </div>
   </section>
 
   <section class="group">
@@ -1268,11 +1292,25 @@ const A = {
   async quickSetDate(oid, key, val) {
     await run(() => api("PATCH", "/orders/" + oid, { values: { [key]: val } }), "已更新");
   },
+  clearShipDate(oid) {
+    modal({ title: "清空发货日期？", body: "清空后这个字段会解锁，可以重新选择发货日期。",
+      danger: true, okText: "确认清空",
+      onOk: () => run(() => api("PATCH", "/orders/" + oid, { values: { shipDate: "" } }), "发货日期已清空") });
+  },
   syncFileName(id, name) {
     const el = $(id + "--name"); if (el) el.textContent = name || "未选择文件";
   },
 
   setF(k, v) { filt[k] = v; render(); },
+  setAdminUserKw(v) {
+    adminUserFilt.kw = v; adminUserFilt.page = 1; clearTimeout(A._auT);
+    A._auT = setTimeout(() => {
+      render();
+      const inp = $("admin-user-kw");
+      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+    }, 300);
+  },
+  setAdminUserPage(p) { adminUserFilt.page = p; render(); },
   setFKw(v) {
     filt.kw = v; clearTimeout(A._kwT);
     A._kwT = setTimeout(() => {
