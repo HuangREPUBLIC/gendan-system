@@ -708,13 +708,17 @@ function statFilterChip() {
 }
 function vOrders() {
   const factoriesOf = o => [o.values.factory, o.values.fabricFactory1, o.values.fabricFactory2, o.values.embFactory, o.values.printFactory].flat().filter(Boolean);
-  const list = state.orders.filter(o =>
+  // 概览卡片的数字要跟季节/业务员/下厂员/搜索/工厂这些筛选保持一致——不然搜索框里填了关键词后，
+  // 卡片还是按全部订单算数，点开却是"卡片数字 ∩ 搜索关键词"，两个数对不上，很confusing
+  const baseFiltered = state.orders.filter(o =>
     (!filt.season || o.season === filt.season) &&
     (!filt.sales || o.values.sales === filt.sales) &&
     (!filt.follower || o.values.follower === filt.follower) &&
     (!filt.kw || [o.values.styleNo, o.values.styleName, o.values.style]
       .join(" ").toLowerCase().includes(filt.kw.toLowerCase())) &&
-    (!filt.factoryKw || factoriesOf(o).includes(filt.factoryKw)) &&
+    (!filt.factoryKw || factoriesOf(o).includes(filt.factoryKw))
+  );
+  const list = baseFiltered.filter(o =>
     // 发货状态：由桌面端概览卡片「进行中」「已发货」点出来的筛选(手机端没有这两张卡，filt.ship 始终为空)
     (!filt.ship || (filt.ship === "shipped" ? !!o.values.shipDate : !o.values.shipDate)) &&
     (!filt.recent || isRecent(latestLog(o)))
@@ -725,7 +729,7 @@ function vOrders() {
   // 业务员自己看到的订单本来就都是自己的，"全部业务员"筛选对他没意义，不显示；下厂员同理
   const myTemplate = (me() || {}).template;
   // 桌面端概览卡片：窄屏下由 CSS 隐藏，手机端看不到，布局跟以前完全一致
-  const all = state.orders;
+  const all = baseFiltered;
   const shipped = all.filter(o => o.values.shipDate).length;
   const recent = all.filter(o => isRecent(latestLog(o))).length;
   const pct = n => all.length ? Math.round(n / all.length * 100) + "%" : "—";
