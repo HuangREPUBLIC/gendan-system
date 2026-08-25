@@ -12,13 +12,16 @@ let state = {
   factories: { emb: [], prod: [], proc: [] }, orders: [], roles: [], seasons: [],
   chat: { contacts: [], activeId: null, contact: null, messages: [], draft: "", att: null },
   unread: { total: 0, byUser: {} },
-  myLogs: null, feedback: null, myFeedback: null
+  // 应用内通知：订单被同事改动时的提醒。list 为 null 表示还没加载过，open 是桌面端铃铛下拉的开合
+  notifs: { list: null, unread: 0, open: false },
+  myLogs: null
 };
 let route = { v: "orders", id: null };
 let editingBasic = false, editingFollower = false, importPreview = null, importRaw = "";
 let showWelcome = false;   // 登录成功后短暂展示的欢迎界面（logo/公司名称/跟单系统）
 const expandedLogGroups = new Set();   // 打卡记录里手动点开"展开全部"的订单(orderId)
-let filt = { season: "", sales: "", follower: "", kw: "", factoryKw: "" };
+// ship/recent 由桌面端概览卡片点出来（手机端没有那些卡片，这两项始终保持默认值）
+let filt = { season: "", sales: "", follower: "", kw: "", factoryKw: "", ship: "", recent: false };
 let adminUserFilt = { kw: "", page: 1 };   // 管理后台「员工账号」表的搜索/分页
 const ADMIN_USERS_PAGE_SIZE = 10;
 let modalState = null;
@@ -509,13 +512,13 @@ function renderLightbox() {
 /* ================= 路由 ================= */
 function go(v, id) {
   route = { v, id: id || null }; editingBasic = false; editingFollower = false;
-  photoDraft = {}; lightbox = null;
+  photoDraft = {}; lightbox = null; state.notifs.open = false;
   if (v !== "chat") { state.chat.activeId = null; state.chat.messages = []; state.chat.draft = ""; state.chat.att = null; }
   render(); window.scrollTo(0, 0);
-  if (v === "account") { A.loadMyLogs(state.me.id); A.loadMyFeedback(); }
+  if (v === "account") A.loadMyLogs(state.me.id);
   if (v === "staffLogs" && id) A.loadMyLogs(id);
-  if (v === "admin") A.loadFeedback();
   if (v === "chat") { A.loadContacts(); A.refreshUnread(); }
+  if (v === "notifs") A.loadNotifs();
 }
 
 /* 每个页面的标题栏配置 */
@@ -531,6 +534,8 @@ function pageMeta() {
       : { title: "聊天" };
     case "admin": return { title: "管理后台" };
     case "account": return { title: "我的" };
+    case "notifs": return { title: "消息通知", left: back("我的", "go('account')"),
+      right: state.notifs.unread ? `<button class="nav-btn" onclick="A.markAllNotifsRead()">全部已读</button>` : "" };
     case "staffLogs": {
       const u = userById(route.id);
       return { title: (u ? u.name : "") + "的打卡", left: back("管理", "go('admin')") };
@@ -542,20 +547,91 @@ const ICONS = {
   orders: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8a2 2 0 0 1 2 2v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6a2 2 0 0 1 2-2z"/><path d="M9 3h6v3H9z"/><path d="M9.5 11h5M9.5 15h5"/></svg>`,
   chat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a7.5 7.5 0 0 1-7.5 7.5c-1.2 0-2.3-.25-3.3-.7L4.5 20l1.3-4.2A7.4 7.4 0 0 1 5 12a7.5 7.5 0 0 1 15 0z"/></svg>`,
   admin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 14a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V20a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H4a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H10a1.6 1.6 0 0 0 1-1.5V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V10a1.6 1.6 0 0 0 1.5 1H20a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>`,
-  account: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/></svg>`
+  account: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="M12 8.5v7M8.5 12h7"/></svg>`,
+  bell: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15.5V10a6 6 0 1 0-12 0v5.5L4.5 18h15z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/></svg>`,
+  search: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>`,
+  clock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.4V12l3.1 1.9"/></svg>`,
+  truck: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5h10v9H3z"/><path d="M13 11h4l3 3v2.5h-7z"/><circle cx="7" cy="17.5" r="1.7"/><circle cx="16.5" cy="17.5" r="1.7"/></svg>`,
+  pulse: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12.5h3.6l2.3-5.6 3.4 10.2 2.5-6.1 1.6 1.5H21"/></svg>`
 };
+const badgeHtml = n => n ? `<span class="badge">${n > 99 ? "99+" : n}</span>` : "";
+// Tab 栏上每个入口的红点数：聊天用聊天未读，「我的」用通知未读(通知入口在「我的」页里)
+function tabBadgeOf(v) {
+  if (v === "chat") return state.unread.total;
+  if (v === "account" || v === "notifs") return state.notifs.unread;
+  return 0;
+}
 function tabbarHtml() {
   const m = me();
   const tabs = [["orders", "订单", ICONS.orders], ["chat", "聊天", ICONS.chat]];
   if (m.template === "admin") tabs.push(["admin", "管理", ICONS.admin]);
   tabs.push(["account", "我的", ICONS.account]);
   const activeTab = route.v === "new" || route.v === "detail" ? "orders"
-    : route.v === "staffLogs" ? "admin" : route.v;
+    : route.v === "staffLogs" ? "admin" : route.v === "notifs" ? "account" : route.v;
   return `<nav class="tabbar">${tabs.map(([v, label, icon]) => `
     <button class="tab ${activeTab === v ? "on" : ""}" data-tab="${v}" onclick="go('${v}')">
-      <span class="ti">${icon}${v === "chat" && state.unread.total
-        ? `<span class="badge">${state.unread.total > 99 ? "99+" : state.unread.total}</span>` : ""}</span>
+      <span class="ti">${icon}${badgeHtml(tabBadgeOf(v))}</span>
       <span>${label}</span></button>`).join("")}</nav>`;
+}
+
+/* ---------- 桌面端（≥1024px）专用的侧边栏 + 顶部条 ----------
+ * 这两块在窄屏下由 CSS 直接 display:none，手机端看到的东西跟以前一模一样；
+ * 宽屏下它们接管导航，底部 Tab 栏和居中标题栏则被隐藏/改造成页面标题。
+ */
+function sidebarHtml() {
+  const m = me();
+  const groups = [
+    ["总览", [["orders", "订单列表", ICONS.orders]]],
+    ["业务", [["new", "新建订单", ICONS.plus], ["chat", "聊天", ICONS.chat]]],
+    ["系统", [
+      ...(m.template === "admin" ? [["admin", "管理后台", ICONS.admin]] : []),
+      ["notifs", "消息通知", ICONS.bell],
+      ["account", "我的", ICONS.account]
+    ]]
+  ];
+  const active = route.v === "detail" ? "orders" : route.v === "staffLogs" ? "admin" : route.v;
+  return `<aside class="dsidebar">
+    <div class="ds-brand">
+      <div class="ds-logo">${APP_LOGO}</div>
+      <div class="ds-brand-txt"><div class="ds-co">${esc(COMPANY_NAME)}</div><div class="ds-app">${esc(APP_NAME)}</div></div>
+    </div>
+    <nav class="ds-nav">${groups.map(([title, items]) => `
+      <div class="ds-group"><div class="ds-group-title">${esc(title)}</div>
+        ${items.map(([v, label, icon]) => `<button class="ds-item ${active === v ? "on" : ""}" data-nav="${v}" onclick="go('${v}')">
+          <span class="ds-ic">${icon}</span><span class="ds-label">${esc(label)}</span>${badgeHtml(tabBadgeOf(v))}</button>`).join("")}
+      </div>`).join("")}</nav>
+    <div class="ds-foot">
+      ${avatarHtml(m.name, "sm")}
+      <div class="ds-me"><div class="ds-me-name">${esc(m.name)}</div><div class="ds-me-role">${esc(roleLabelOf(m))}</div></div>
+    </div></aside>`;
+}
+function notifItemsHtml() {
+  const list = state.notifs.list;
+  if (!list) return `<div class="empty">加载中…</div>`;
+  if (!list.length) return `<div class="empty">暂无通知</div>`;
+  return list.map(n => `<div class="notif${n.read ? "" : " un"}" role="button" tabindex="0"
+    onclick="A.openNotif('${n.id}','${esc(n.orderId || "")}')">
+    <span class="n-dot"></span>
+    <div class="n-main"><div class="n-text">${esc(n.text)}</div>
+      <div class="n-time num">${fmtT(n.createdAt)}</div></div></div>`).join("");
+}
+function deskHeaderHtml() {
+  const n = state.notifs;
+  return `<div class="dheader">
+    <label class="dh-search"><span class="dh-sic">${ICONS.search}</span>
+      <input class="dh-input" id="dh-kw" placeholder="搜索货号 / 款式名" value="${esc(filt.kw)}"
+        oninput="A.setDeskKw(this.value)"></label>
+    <div class="dh-actions">
+      <button class="dh-icon" title="消息通知" onclick="A.toggleNotifPanel()">${ICONS.bell}${badgeHtml(n.unread)}</button>
+      <div class="dh-user">${avatarHtml(me().name, "sm")}<span class="dh-uname">${esc(me().name)}</span></div>
+    </div>
+    ${n.open ? `<div class="notif-back" onclick="A.closeNotifPanel()"></div>
+      <div class="notif-panel"><div class="np-head"><span>消息通知</span>
+        <button class="btn plain" onclick="event.stopPropagation();A.markAllNotifsRead()">全部已读</button></div>
+      <div class="np-list">${notifItemsHtml()}</div>
+      <div class="np-foot"><button class="btn plain block" onclick="A.closeNotifPanel();go('notifs')">查看全部通知</button></div></div>` : ""}
+  </div>`;
 }
 
 function render() {
@@ -565,8 +641,9 @@ function render() {
   if (!me()) { app.innerHTML = vLogin(); return; }
   const meta = pageMeta();
   const views = { orders: vOrders, new: vNew, detail: vDetail, chat: vChat,
-    admin: vAdmin, account: vAccount, staffLogs: vStaffLogs };
+    admin: vAdmin, account: vAccount, staffLogs: vStaffLogs, notifs: vNotifs };
   app.innerHTML = `
+    ${sidebarHtml()}${deskHeaderHtml()}
     ${route.v === "orders" ? `<div class="home-brand"><div class="co">${esc(COMPANY_NAME)}</div><div class="app">${esc(APP_NAME)}</div></div>` : ""}
     <header class="navbar"><div class="navbar-in">
       <div class="nav-slot">${meta.left || ""}</div>
@@ -618,6 +695,17 @@ function latestLog(o) {
   for (const s of (o.subs || [])) for (const e of s.log) if (!best || e.t > best.t) best = { ...e, fieldLabel: s.name };
   return best;
 }
+// 最近 7 天内有过打卡更新
+const isRecent = l => !!l && (Date.now() - l.t) <= 7 * 24 * 60 * 60 * 1000;
+// 概览卡片点出来的筛选条件，在订单列表标题旁边显示成一个可一键取消的标签；
+// 手机端没有概览卡片，filt.ship/filt.recent 永远是空的，所以这个标签在手机端不会出现
+function statFilterChip() {
+  const label = filt.ship === "pending" ? "进行中（未填发货日期）"
+    : filt.ship === "shipped" ? "已发货" : filt.recent ? "近7天有更新" : "";
+  if (!label) return "";
+  return ` <span class="tag filter-chip">${esc(label)}
+    <a href="javascript:void(0)" onclick="A.setStatFilter('all')" title="取消筛选">✕</a></span>`;
+}
 function vOrders() {
   const factoriesOf = o => [o.values.factory, o.values.fabricFactory1, o.values.fabricFactory2, o.values.embFactory, o.values.printFactory].flat().filter(Boolean);
   const list = state.orders.filter(o =>
@@ -626,14 +714,38 @@ function vOrders() {
     (!filt.follower || o.values.follower === filt.follower) &&
     (!filt.kw || [o.values.styleNo, o.values.styleName, o.values.style]
       .join(" ").toLowerCase().includes(filt.kw.toLowerCase())) &&
-    (!filt.factoryKw || factoriesOf(o).includes(filt.factoryKw))
+    (!filt.factoryKw || factoriesOf(o).includes(filt.factoryKw)) &&
+    // 发货状态：由桌面端概览卡片「进行中」「已发货」点出来的筛选(手机端没有这两张卡，filt.ship 始终为空)
+    (!filt.ship || (filt.ship === "shipped" ? !!o.values.shipDate : !o.values.shipDate)) &&
+    (!filt.recent || isRecent(latestLog(o)))
   ).slice().sort((a, b) => b.createdAt - a.createdAt);
   const opt = (arr, cur) => arr.map(([v, t]) =>
     `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(t)}</option>`).join("");
   const allFactories = [...new Set([...state.factories.prod, ...state.factories.fabric, ...state.factories.emb])];
   // 业务员自己看到的订单本来就都是自己的，"全部业务员"筛选对他没意义，不显示；下厂员同理
   const myTemplate = (me() || {}).template;
-  return `<section class="group">
+  // 桌面端概览卡片：窄屏下由 CSS 隐藏，手机端看不到，布局跟以前完全一致
+  const all = state.orders;
+  const shipped = all.filter(o => o.values.shipDate).length;
+  const recent = all.filter(o => isRecent(latestLog(o))).length;
+  const pct = n => all.length ? Math.round(n / all.length * 100) + "%" : "—";
+  // 每张卡片都能点：点了就把订单列表按对应条件筛出来，再点一次取消（「订单总数」是清空这两个条件）
+  const statActive = k => k === "all" ? (!filt.ship && !filt.recent)
+    : k === "recent" ? !!filt.recent : filt.ship === k;
+  const statCard = (key, label, value, sub, icon, tone) => `<button type="button"
+    class="dstat${statActive(key) ? " on" : ""}" onclick="A.setStatFilter('${key}')"
+    aria-pressed="${statActive(key)}" title="点击筛选出这些订单">
+    <span class="dstat-ic ${tone || ""}">${icon}</span>
+    <div class="dstat-main"><div class="dstat-label">${esc(label)}</div>
+      <div class="dstat-num num">${esc(String(value))}</div>
+      <div class="dstat-sub">${esc(sub)}</div></div></button>`;
+  return `<section class="group dstats-wrap"><div class="dstats">
+      ${statCard("all", "订单总数", all.length, "我可见的全部订单", ICONS.orders)}
+      ${statCard("pending", "进行中", all.length - shipped, "尚未填写发货日期", ICONS.clock, "warn")}
+      ${statCard("shipped", "已发货", shipped, "占 " + pct(shipped), ICONS.truck, "ok")}
+      ${statCard("recent", "近7天有更新", recent, "占 " + pct(recent), ICONS.pulse, "sky")}
+    </div></section>
+  <section class="group">
     <div class="card"><div class="filters">
       <select class="in" onchange="A.setF('season',this.value)"><option value="">全部季节</option>${opt(seasonOptions("").map(s => [s, s]), filt.season)}</select>
       ${myTemplate === "sales" ? "" : `<select class="in" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]), filt.sales)}</select>`}
@@ -642,8 +754,8 @@ function vOrders() {
       <select class="in" onchange="A.setF('factoryKw',this.value)"><option value="">全部工厂</option>${opt(allFactories.map(x => [x, x]), filt.factoryKw)}</select>
     </div></div></section>
   <section class="group">
-    <div class="group-title">订单列表 · 共 ${list.length} 单</div>
-    <div class="card">${list.map(o => {
+    <div class="group-title">订单列表 · 共 ${list.length} 单${statFilterChip()}</div>
+    <div class="card olist">${list.map(o => {
       const latest = latestLog(o);
       return `<div class="ocard" onclick="go('detail','${o.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')go('detail','${o.id}')">
         <div class="thumb">${(function(){const photos=normalizePhotos(o.values.img);return photos.length?`<img src="${esc(photos[0])}" alt="款式图" data-gallery='${JSON.stringify(photos)}' data-i="0" onclick="event.stopPropagation();A.lightboxFromEl(this)">`:"款式图";})()}</div>
@@ -820,7 +932,7 @@ function vDetail() {
   const orderKvFields = scalars("order").filter(f => f.type !== "image" && !isQuickDateField(f));
   const dateFieldsOrder = scalars("order").filter(isQuickDateField);
 
-  return `<section class="group">
+  return `<section class="group g-head">
     <div class="card"><div class="card-pad" style="display:flex;align-items:center;gap:14px">
       <span class="tag season" style="flex:none;font-size:14px;padding:5px 12px">${esc(o.season)}</span>
       <div style="flex:1;min-width:0">
@@ -830,7 +942,7 @@ function vDetail() {
       ${headerThumb}
     </div></div></section>
 
-  <section class="group">
+  <section class="group g-order">
     <div class="group-title"><span class="cat-title">一、订单明细</span>${canEditOrd ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}</div>
     <div class="card">${editingBasic && canEditOrd
       ? `<label class="field"><span>订单季节</span>${seasonSelectHtml(o.season)}</label>${editForm("order")}
@@ -840,7 +952,7 @@ function vDetail() {
     <div class="card" style="margin-top:14px">${logsOf("order").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canOrdLog, "order")).join("")}</div>
   </section>
 
-  <section class="group">
+  <section class="group g-prod">
     <div class="group-title"><span class="cat-title">二、生产明细</span>${canEditOrd ? `<button class="btn mini ghost right" onclick="A.toggleFollower()">${editingFollower ? "取消" : "编辑"}</button>` : ""}
       <span style="margin-left:8px;font-size:12.5px;color:var(--ink-2)">${o.values.follower ? `负责人 ${esc(uname(o.values.follower))}` : "未指定下厂员"}</span></div>
     <div class="card">${editingFollower && canEditOrd
@@ -865,7 +977,7 @@ function vDetail() {
     ${dateFieldsProd.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsProd, canEditShipDate(o))}</div>` : ""}
   </section>
 
-  <section class="group">
+  <section class="group g-insp">
     <div class="group-title"><span class="cat-title">三、验货问题</span>${canInsp ? `<button class="btn mini ghost right" onclick="A.toggleAdd('insp')">＋ 新增</button>` : ""}</div>
     <div class="card">
       ${canInsp ? `<div class="addbox" id="add-insp">
@@ -877,7 +989,7 @@ function vDetail() {
         : `<div class="empty">暂无验货记录</div>`}</div>
   </section>
 
-  <section class="group">
+  <section class="group g-follow">
     <div class="group-title"><span class="cat-title">四、跟单小结</span><button class="btn mini ghost right" onclick="A.toggleAdd('follow')">＋ 添加</button></div>
     <div class="card">
       <div class="addbox" id="add-follow" style="padding:12px 16px">
@@ -889,7 +1001,7 @@ function vDetail() {
           `<button type="button" class="act-btn danger" onclick="A.delFollow('${o.id}','${e.id}')">删</button>` : ""}</div>
         ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>` : `<div class="empty">暂无记录</div>`}</div>
   </section>
-  ${isAdmin() ? `<section class="group"><div class="btn-row" style="padding-left:0;padding-right:0">
+  ${isAdmin() ? `<section class="group g-del"><div class="btn-row" style="padding-left:0;padding-right:0">
     <button class="btn danger ghost block" onclick="A.delOrder('${o.id}')">删除此订单</button></div></section>` : ""}`;
 }
 
@@ -1014,7 +1126,7 @@ function vAdmin() {
   if (adminUserFilt.page < 1) adminUserFilt.page = 1;
   const pageStart = (adminUserFilt.page - 1) * ADMIN_USERS_PAGE_SIZE;
   const pageStaff = matched.slice(pageStart, pageStart + ADMIN_USERS_PAGE_SIZE);
-  return `<section class="group">
+  return `<section class="group a-users">
     <div class="group-title">员工账号 · 共 ${allStaff.length} 人</div>
     <div class="card"><div class="card-pad" style="padding-bottom:0">
       <input class="in" id="admin-user-kw" placeholder="搜索姓名" value="${esc(adminUserFilt.kw)}" oninput="A.setAdminUserKw(this.value)">
@@ -1036,7 +1148,7 @@ function vAdmin() {
     </div>
   </section>
 
-  <section class="group">
+  <section class="group a-newuser">
     <div class="group-title">新增员工</div>
     <div class="card">
       <label class="field"><span>姓名</span><input class="in" id="nu-name"></label>
@@ -1047,7 +1159,7 @@ function vAdmin() {
       <div class="btn-row"><button class="btn" onclick="A.addUser()">创建账号</button></div></div>
   </section>
 
-  <section class="group">
+  <section class="group a-export">
     <div class="group-title">数据导出</div>
     <div class="card"><div class="card-pad">
       <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">导出订单全部内容（订单基本信息、生产进度、验货问题、跟单小结）为 Excel(.xlsx) 文件，照片以链接形式列出</p>
@@ -1057,7 +1169,7 @@ function vAdmin() {
       <button class="btn" onclick="A.exportData()">导出订单数据</button></div></div>
   </section>
 
-  <section class="group">
+  <section class="group a-roles">
     <div class="group-title">职位管理</div>
     <div class="card"><div class="card-pad">
       <div style="display:flex;gap:8px;flex-wrap:wrap">${state.roles.map(r => `<span class="tag role">${esc(r.label)}
@@ -1071,7 +1183,7 @@ function vAdmin() {
       <div class="btn-row"><button class="btn" onclick="A.addRole()">添加职位</button></div></div>
   </section>
 
-  <section class="group">
+  <section class="group a-seasons">
     <div class="group-title">季节管理</div>
     <div class="card"><div class="card-pad">
       <div style="display:flex;gap:8px;flex-wrap:wrap">${state.seasons.map(s => `<span class="tag role">${esc(s)}
@@ -1080,23 +1192,24 @@ function vAdmin() {
       <div class="btn-row"><button class="btn" onclick="A.addSeason()">添加季节</button></div></div>
   </section>
 
-  <section class="group">
+  <section class="group a-fields">
     <div class="group-title">自定义字段</div>
-    <div class="card">
-      ${["order", "production"].map(s => `<div class="card-pad" style="padding-bottom:6px">
+    <div class="card cf-split">
+      <div class="cf-lists">${["order", "production"].map(s => `<div class="card-pad" style="padding-bottom:6px">
         <div class="row-sub" style="margin-bottom:6px">${s === "order" ? "一、订单明细" : "二、生产明细"}</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">${state.fields[s].map(f => `<span class="tag role">${esc(f.label)}${
-          f.core ? "" : ` <a href="javascript:void(0)" onclick="A.delField('${s}','${f.k}')" style="margin-left:4px">✕</a>`}</span>`).join("")}</div></div>`).join("")}
+          f.core ? "" : ` <a href="javascript:void(0)" onclick="A.delField('${s}','${f.k}')" style="margin-left:4px">✕</a>`}</span>`).join("")}</div></div>`).join("")}</div>
+      <div class="cf-form">
       <label class="field"><span>添加到板块</span><select class="in" id="cf-sec"><option value="order">一、订单明细</option><option value="production">二、生产明细</option></select></label>
       <label class="field"><span>字段名称</span><input class="in" id="cf-label" placeholder="例：吊牌进度"></label>
       <label class="field"><span>字段类型</span><select class="in" id="cf-type" onchange="document.getElementById('cf-opts-wrap').style.display=this.value==='select'?'':'none'">
         <option value="text">文本</option><option value="log">进度打卡（保留历史）</option><option value="date">日期</option>
         <option value="number">数字</option><option value="select">下拉菜单</option></select></label>
       <label class="field" id="cf-opts-wrap" style="display:none"><span>下拉选项（逗号分隔）</span><input class="in" id="cf-opts" placeholder="例：选项A,选项B"></label>
-      <div class="btn-row"><button class="btn" onclick="A.addField()">添加字段</button></div></div>
+      <div class="btn-row"><button class="btn" onclick="A.addField()">添加字段</button></div></div></div>
   </section>
 
-  <section class="group">
+  <section class="group a-factories">
     <div class="group-title">工厂下拉选项</div>
     <div class="card">${[["fabric", "面料工厂"], ["emb", "绣花/印花工厂"], ["prod", "服装工厂"]].map(([k, t]) => `
       <div class="card-pad" style="padding-bottom:10px">
@@ -1105,18 +1218,15 @@ function vAdmin() {
           `<span class="tag role">${esc(x)} <a href="javascript:void(0)" onclick="A.delFactory('${k}','${encodeURIComponent(x)}')" style="margin-left:4px">✕</a></span>`).join("")}</div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <input class="in" id="fac-${k}" placeholder="新工厂名"><button class="btn mini ghost" onclick="A.addFactory('${k}')">添加</button></div></div>`).join("")}</div>
-  </section>
+  </section>`;
+}
 
-  <section class="group">
-    <div class="group-title">意见反馈${state.feedback ? ` · 共 ${state.feedback.length} 条` : ""}</div>
-    <div class="card">${state.feedback && state.feedback.length
-      ? `<ul class="log" style="padding:4px 16px">${state.feedback.map(f => `<li>
-          <div class="meta"><b>${esc(f.byName)}</b><span class="num">${fmtT(f.createdAt)}</span>
-            ${f.handled ? `<span class="tag ok">已处理</span>` : ""}
-            <button type="button" class="act-btn${f.handled ? " ghost" : ""} right" onclick="A.toggleFeedbackHandled('${f.id}',${!f.handled})">
-              ${f.handled ? "标记未处理" : "标记已处理"}</button></div>
-          <div class="txt">${esc(f.text)}</div></li>`).join("")}</ul>`
-      : `<div class="empty">${state.feedback ? "还没有反馈" : "加载中…"}</div>`}</div>
+/* ---------- 消息通知 ---------- */
+function vNotifs() {
+  const list = state.notifs.list;
+  return `<section class="group">
+    <div class="group-title">订单动态${list ? ` · 共 ${list.length} 条` : ""}</div>
+    <div class="card notif-list">${notifItemsHtml()}</div>
   </section>`;
 }
 
@@ -1132,6 +1242,13 @@ function vAccount() {
     </div></section>
 
   <section class="group">
+    <div class="card"><div class="row-item tap" onclick="go('notifs')" role="button" tabindex="0">
+      <div class="row-main"><div class="row-label">消息通知</div>
+        <div class="row-sub">订单被同事更新时在这里提醒你</div></div>
+      ${badgeHtml(state.notifs.unread)}<span class="chev">›</span></div></div>
+  </section>
+
+  <section class="group">
     <div class="group-title">修改密码</div>
     <div class="card">
       <label class="field"><span>新密码</span><input class="in" type="password" id="my-p1"></label>
@@ -1142,17 +1259,6 @@ function vAccount() {
   <section class="group">
     <div class="group-title">我的打卡记录${state.myLogs ? ` · 共 ${state.myLogs.length} 条` : ""}</div>
     <div class="card">${logListHtml(state.myLogs)}</div>
-  </section>
-
-  <section class="group">
-    <div class="group-title">意见反馈</div>
-    <div class="card"><div class="card-pad">
-      <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">对系统有什么建议或发现什么问题，都可以写在这里，管理员会看到</p>
-      <button class="btn ghost" onclick="A.submitFeedback()">提交反馈</button></div>
-      ${state.myFeedback && state.myFeedback.length ? `<ul class="log" style="padding:4px 16px 12px">${state.myFeedback.map(f => `<li>
-        <div class="meta"><span class="num">${fmtT(f.createdAt)}</span>
-          ${f.handled ? `<span class="tag ok">已处理</span>` : `<span class="tag role">待处理</span>`}</div>
-        <div class="txt">${esc(f.text)}</div></li>`).join("")}</ul>` : ""}</div>
   </section>
 
   <section class="group">
@@ -1219,6 +1325,7 @@ const A = {
       await Promise.all([refresh(), new Promise(res => setTimeout(res, 1500))]);
       go("orders");
       A.dismissWelcome();
+      A.refreshUnread(); A.refreshNotifUnread();
     } catch (e) {
       // 只有「密码对了但 bootstrap 接口失败」才需要把已经顶上的欢迎界面收回去；
       // 单纯密码错误时 showWelcome 还是 false，不用重渲染，否则会把用户刚输入的手机号也清空
@@ -1302,6 +1409,24 @@ const A = {
   },
 
   setF(k, v) { filt[k] = v; render(); },
+  // 概览卡片点击：筛出对应的订单；再点一次(或点「订单总数」)取消筛选。
+  // 不在订单列表页时先跳回订单列表，这样在任何页面点卡片都能直接看到结果。
+  setStatFilter(kind) {
+    const already = kind === "recent" ? filt.recent : filt.ship === kind;
+    if (kind === "all" || already) { filt.ship = ""; filt.recent = false; }
+    else if (kind === "recent") { filt.ship = ""; filt.recent = true; }
+    else { filt.ship = kind; filt.recent = false; }
+    if (route.v !== "orders") go("orders"); else { render(); window.scrollTo(0, 0); }
+  },
+  // 桌面端顶部条的全局搜索：跟订单列表里的关键词筛选是同一个 filt.kw，输入时自动切到订单列表
+  setDeskKw(v) {
+    filt.kw = v; clearTimeout(A._dkT);
+    A._dkT = setTimeout(() => {
+      if (route.v !== "orders") go("orders"); else render();
+      const inp = $("dh-kw");
+      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+    }, 300);
+  },
   setAdminUserKw(v) {
     adminUserFilt.kw = v; adminUserFilt.page = 1; clearTimeout(A._auT);
     A._auT = setTimeout(() => {
@@ -1533,26 +1658,6 @@ const A = {
     if (expandedLogGroups.has(orderId)) expandedLogGroups.delete(orderId); else expandedLogGroups.add(orderId);
     render();
   },
-  submitFeedback() {
-    modal({ title: "意见反馈", input: "textarea", okText: "提交",
-      onOk: v => { if (v && v.trim()) run(() => api("POST", "/feedback", { text: v.trim() }).then(() => A.loadMyFeedback()), "感谢反馈，已提交给管理员"); } });
-  },
-  async loadFeedback() {
-    if (!isAdmin()) return;
-    state.feedback = null;
-    try { state.feedback = await api("GET", "/feedback"); }
-    catch (e) { state.feedback = []; }
-    render();
-  },
-  async toggleFeedbackHandled(id, handled) {
-    await run(() => api("PATCH", `/feedback/${id}`, { handled }).then(() => A.loadFeedback()),
-      handled ? "已标记为已处理" : "已标记为未处理");
-  },
-  async loadMyFeedback() {
-    try { state.myFeedback = await api("GET", "/feedback/mine"); }
-    catch (e) { state.myFeedback = []; }
-    render();
-  },
   viewStaffLogs(id) { go("staffLogs", id); },
 
   /* ---- 聊天 ---- */
@@ -1628,6 +1733,47 @@ const A = {
       state.unread = u;
       if (changed && document.querySelector(".tabbar")) render();
     } catch (e) { }
+  },
+
+  /* ---- 应用内通知：跟聊天未读一个套路，同一个定时器里轮询未读数 ---- */
+  async refreshNotifUnread() {
+    try {
+      const r = await api("GET", "/notifications/unread-count");
+      const changed = r.total !== state.notifs.unread;
+      state.notifs.unread = r.total;
+      if (changed && document.querySelector(".tabbar")) render();
+    } catch (e) { }
+  },
+  async loadNotifs() {
+    try { state.notifs.list = await api("GET", "/notifications"); }
+    catch (e) { state.notifs.list = []; }
+    render();
+  },
+  toggleNotifPanel() {
+    state.notifs.open = !state.notifs.open;
+    render();
+    if (state.notifs.open) A.loadNotifs();
+  },
+  closeNotifPanel() { state.notifs.open = false; render(); },
+  // 点一条通知：标记已读 + 跳到对应订单（订单已被删掉时就留在通知列表里）
+  async openNotif(id, orderId) {
+    state.notifs.open = false;
+    const n = (state.notifs.list || []).find(x => x.id === id);
+    if (n && !n.read) {
+      n.read = true;
+      state.notifs.unread = Math.max(0, state.notifs.unread - 1);
+      try { await api("POST", `/notifications/${id}/read`); } catch (e) { }
+    }
+    if (orderId && state.orders.some(o => o.id === orderId)) go("detail", orderId);
+    else { render(); if (orderId) toast("这张订单已经不在了"); }
+  },
+  async markAllNotifsRead() {
+    try {
+      await api("POST", "/notifications/read-all");
+      state.notifs.unread = 0;
+      (state.notifs.list || []).forEach(n => n.read = true);
+      render(); toast("已全部标为已读");
+    } catch (e) { toast((e && e.error) || "操作失败"); }
   },
 
   async exportData() {
@@ -1920,8 +2066,8 @@ window.addEventListener("appinstalled", () => { deferredInstall = null; toast("�
   }
   render();
   if (showWelcome) A.dismissWelcome();
-  if (state.me) { A.refreshUnread(); A.loadContacts(true); }
-  setInterval(() => { if (state.me) A.refreshUnread(); }, 10000);
+  if (state.me) { A.refreshUnread(); A.refreshNotifUnread(); A.loadContacts(true); }
+  setInterval(() => { if (state.me) { A.refreshUnread(); A.refreshNotifUnread(); } }, 10000);
   setInterval(() => {
     if (!state.me) return;
     if (route.v === "chat") { if (state.chat.activeId) A.loadConversation(); else A.loadContacts(); }

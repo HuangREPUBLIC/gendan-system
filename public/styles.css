@@ -436,3 +436,184 @@ table.tbl{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
 .act-btn.ghost{background:transparent;box-shadow:inset 0 0 0 1px var(--line-2);color:var(--ink-2)}
 .act-btn + .act-btn{margin-left:7px}
 .act-row{display:inline-flex;align-items:center;flex-wrap:wrap;gap:0}
+
+/* ==========================================================================
+   应用内通知（手机端在「我的 > 消息通知」，桌面端在顶部铃铛下拉里，两边共用一套样式）
+   ========================================================================== */
+.notif{display:flex;gap:10px;align-items:flex-start;padding:12px 16px;cursor:pointer;
+  background:var(--card);border-bottom:.5px solid var(--line)}
+.notif:last-child{border-bottom:0}
+.notif{transition:background-color 140ms ease}
+.notif:active{background:var(--bg)}
+.notif .n-dot{width:7px;height:7px;border-radius:50%;background:transparent;flex:none;margin-top:7px}
+.notif.un .n-dot{background:var(--bad)}
+.notif.un .n-text{font-weight:600}
+.n-main{flex:1;min-width:0}
+.n-text{font-size:15px;line-height:1.45;word-break:break-word}
+.n-time{font-size:12.5px;color:var(--ink-2);margin-top:2px}
+
+/* ==========================================================================
+   桌面端（≥1024px）：左侧固定侧边栏 + 顶部条 + 更宽的内容排布
+   —— 下面这些块在窄屏下一律 display:none，手机端看到的界面跟以前完全一致，
+      所有改动都被 @media(min-width:1024px) 包住，不影响 1023px 及以下。
+   ========================================================================== */
+.dsidebar,.dheader,.dstats-wrap{display:none}
+/* 概览卡片是 <button>（整张卡片可点击去筛选订单）。浏览器默认会给 button 描一圈边框，
+   这里在媒体查询外面就先清掉：即使样式表被浏览器缓存成旧版本、只加载到这一段，
+   也不会出现一圈黑色描边——卡片一律只靠阴影跟背景区分，跟页面里其它卡片保持一致。 */
+.dstat{appearance:none;-webkit-appearance:none;border:0;background:var(--card);
+  color:inherit;font:inherit;text-align:left;width:100%}
+
+@media(min-width:1024px){
+  :root{--side-w:236px;--dh-h:60px}
+
+  /* ---- 左侧侧边栏 ---- */
+  .dsidebar{display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0;width:var(--side-w);
+    background:var(--card);border-right:.5px solid var(--line);z-index:50}
+  .ds-brand{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:.5px solid var(--line)}
+  .ds-logo{width:34px;height:34px;border-radius:10px;overflow:hidden;flex:none;
+    box-shadow:0 3px 10px rgba(16,56,108,.22)}
+  .ds-logo svg{width:100%;height:100%;display:block}
+  .ds-brand-txt{min-width:0}
+  .ds-co{font-size:11px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ds-app{font-size:15.5px;font-weight:700;letter-spacing:-.02em;line-height:1.25}
+  .ds-nav{flex:1;overflow-y:auto;padding:14px 12px}
+  .ds-group + .ds-group{margin-top:18px}
+  .ds-group-title{font-size:11px;font-weight:600;letter-spacing:.09em;color:var(--ink-2);padding:0 10px 7px}
+  .ds-item{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;cursor:pointer;
+    color:var(--ink-2);font-size:14.5px;padding:9px 10px;border-radius:9px;text-align:left;
+    transition:background-color 140ms ease, color 140ms ease}
+  .ds-item + .ds-item{margin-top:2px}
+  .ds-item:hover{background:var(--bg);color:var(--ink)}
+  .ds-item.on{background:var(--sky-soft);color:var(--blue-2);font-weight:600}
+  .ds-ic{width:19px;height:19px;flex:none;display:flex;align-items:center;justify-content:center}
+  .ds-ic svg{width:19px;height:19px;display:block}
+  .ds-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ds-foot{display:flex;align-items:center;gap:10px;padding:12px 16px;border-top:.5px solid var(--line)}
+  .ds-me{min-width:0}
+  .ds-me-name{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ds-me-role{font-size:12px;color:var(--ink-2)}
+
+  /* ---- 顶部条：全局搜索 + 通知铃铛 + 当前用户 ---- */
+  .dheader{display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:52;
+    height:var(--dh-h);padding:0 28px;margin-left:var(--side-w);
+    background:var(--nav-bg);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:.5px solid var(--line)}
+  .dh-search{position:relative;display:flex;align-items:center;flex:1;max-width:420px;margin:0}
+  .dh-sic{position:absolute;left:11px;width:17px;height:17px;color:var(--ink-2);display:flex;pointer-events:none}
+  .dh-sic svg{width:17px;height:17px}
+  .dh-input{width:100%;height:38px;border:.5px solid var(--line-2);border-radius:10px;
+    background:var(--bg);color:var(--ink);outline:none;font-size:14.5px;padding:0 12px 0 34px;
+    transition:border-color 150ms ease, box-shadow 150ms ease}
+  .dh-input:focus{border-color:var(--blue-2);box-shadow:0 0 0 3.5px color-mix(in srgb,var(--blue-2) 14%,transparent)}
+  .dh-actions{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .dh-icon{position:relative;width:38px;height:38px;border-radius:10px;border:0;background:transparent;
+    color:var(--ink-2);cursor:pointer;display:flex;align-items:center;justify-content:center;
+    transition:background-color 140ms ease, color 140ms ease}
+  .dh-icon:hover{background:var(--bg);color:var(--ink)}
+  .dh-icon svg{width:20px;height:20px}
+  .dh-icon .badge{position:absolute;top:3px;right:2px}
+  .dh-user{display:flex;align-items:center;gap:8px;padding-left:12px;border-left:.5px solid var(--line)}
+  .dh-uname{font-size:14px;font-weight:600}
+
+  /* ---- 通知下拉 ---- */
+  .notif-back{position:fixed;inset:0;z-index:54}
+  .notif-panel{position:absolute;top:calc(var(--dh-h) - 4px);right:24px;width:384px;max-height:min(70vh,520px);
+    display:flex;flex-direction:column;background:var(--card);border-radius:var(--radius-lg);z-index:55;overflow:hidden;
+    box-shadow:0 18px 44px rgba(0,0,0,.18), 0 0 0 .5px var(--line);animation:notifPop 180ms var(--ease-out)}
+  @keyframes notifPop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+  .np-head{display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:11px 10px 11px 16px;border-bottom:.5px solid var(--line);font-weight:600;font-size:15px}
+  .np-list{flex:1;overflow-y:auto}
+  .np-foot{border-top:.5px solid var(--line)}
+  .notif:hover{background:var(--bg)}
+
+  /* ---- 主内容区：让出侧边栏宽度，铺满剩余横向空间 ---- */
+  .home-brand{display:none}
+  .tabbar{display:none}
+  .navbar{position:static;margin-left:var(--side-w);background:transparent;border-bottom:0;
+    backdrop-filter:none;-webkit-backdrop-filter:none}
+  .navbar-in{max-width:none;padding:22px 28px 6px;height:auto}
+  .nav-title{text-align:left;font-size:23px;font-weight:700;letter-spacing:-.03em}
+  .nav-slot{min-width:0}
+  .page{max-width:none;margin:0 0 0 var(--side-w);padding:8px 28px 40px}
+  .page.chat-full{height:calc(100dvh - var(--dh-h) - 74px);padding:0 28px 24px}
+  .page.chat-full .chat-card{border-radius:var(--radius-lg)}
+  .msg{left:calc(50% + var(--side-w) / 2);bottom:32px}
+
+  /* 筛选条：宽屏一行放得下就一行，放不下自动换，不留半行空白 */
+  .filters{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+
+  /* ---- 概览统计卡片（只在宽屏出现） ---- */
+  .dstats-wrap{display:block}
+  .dstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
+  /* 每张卡片都是可点击的筛选入口 */
+  .dstat{display:flex;align-items:flex-start;gap:12px;background:var(--card);
+    border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:15px 18px;
+    width:100%;border:0;text-align:left;cursor:pointer;font:inherit;color:inherit;
+    transition:box-shadow 160ms ease, transform 160ms var(--ease-out)}
+  .dstat:hover{box-shadow:0 6px 20px rgba(16,56,108,.12);transform:translateY(-1px)}
+  .dstat.on{box-shadow:0 0 0 2px var(--blue-2), 0 6px 20px rgba(16,56,108,.12)}
+  .dstat:focus-visible{outline:2.5px solid var(--blue-2);outline-offset:2px}
+  .filter-chip{margin-left:8px;background:var(--sky-soft);color:var(--blue-2);font-weight:600}
+  .dstat-ic{width:38px;height:38px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;
+    background:var(--sky-soft);color:var(--blue-2)}
+  .dstat-ic svg{width:20px;height:20px}
+  .dstat-ic.ok{background:var(--ok-soft);color:var(--ok)}
+  .dstat-ic.warn{background:var(--bad-soft);color:var(--warn)}
+  .dstat-ic.sky{background:var(--sky-soft);color:var(--sky)}
+  .dstat-main{min-width:0}
+  .dstat-label{font-size:12.5px;color:var(--ink-2)}
+  .dstat-num{font-size:26px;font-weight:700;letter-spacing:-.02em;line-height:1.22}
+  .dstat-sub{font-size:12px;color:var(--ink-2)}
+
+  /* ---- 订单列表：宽屏改成多栏卡片网格，不再是一条条纵向堆叠 ---- */
+  .olist{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;
+    background:transparent;box-shadow:none;border-radius:0;overflow:visible}
+  .olist .ocard{background:var(--card);border-radius:var(--radius-lg);box-shadow:var(--shadow);
+    border-bottom:0;align-items:flex-start;padding:14px 16px;
+    transition:box-shadow 160ms ease, transform 160ms var(--ease-out)}
+  .olist .ocard:hover{box-shadow:0 6px 20px rgba(16,56,108,.12);transform:translateY(-1px)}
+  .olist .ocard .chev{align-self:center}
+  .olist .empty{grid-column:1/-1;background:var(--card);border-radius:var(--radius-lg);padding:34px 16px}
+
+  /* ---- 订单详情：左边订单明细/验货/跟单，右边生产明细，不再全部纵向堆叠 ---- */
+  .page[data-view="detail"]{display:grid;grid-template-columns:minmax(0,1.02fr) minmax(0,1fr);
+    column-gap:24px;align-items:start}
+  .page[data-view="detail"] > .g-head{grid-column:1 / -1}
+  .page[data-view="detail"] > .g-order{grid-column:1;grid-row:2}
+  .page[data-view="detail"] > .g-insp{grid-column:1;grid-row:3}
+  .page[data-view="detail"] > .g-follow{grid-column:1;grid-row:4}
+  .page[data-view="detail"] > .g-prod{grid-column:2;grid-row:2 / span 3}
+  .page[data-view="detail"] > .g-del{grid-column:1 / -1;grid-row:5}
+
+  /* ---- 管理后台：12 栅格重新组织，按内容体量给每块分配宽度 ----
+   * 第一行 员工账号(宽) + 新增员工；第二行 数据导出/职位管理/季节管理 三块轻量内容并排；
+   * 第三行 自定义字段(内部再左右分栏) + 工厂下拉选项。
+   * grid-column 只在 grid 容器里生效，窄屏不是 grid，所以手机端仍是原来的纵向堆叠。 */
+  .page[data-view="admin"]{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));
+    column-gap:24px;align-items:start}
+  .page[data-view="admin"] > .group{grid-column:span 6}
+  .page[data-view="admin"] > .a-users{grid-column:span 7}
+  .page[data-view="admin"] > .a-newuser{grid-column:span 5}
+
+  /* ---- 消息通知整页：内容不用铺满超宽屏，读起来更舒服 ---- */
+  .page[data-view="notifs"]{max-width:1040px}
+}
+
+/* 1024–1399px：详情页左右分栏后每栏并不宽，栏内表单退回单列，避免字段被挤扁 */
+@media(min-width:1024px) and (max-width:1399px){
+  .page[data-view="detail"] .grid2{grid-template-columns:1fr}
+}
+
+/* ≥1280px 才够宽：管理后台把三块轻量内容并成一行，自定义字段再拆成"字段列表 | 添加表单" */
+@media(min-width:1280px){
+  .page[data-view="admin"] > .a-export,
+  .page[data-view="admin"] > .a-roles,
+  .page[data-view="admin"] > .a-seasons{grid-column:span 4}
+  .page[data-view="admin"] > .a-fields{grid-column:span 7}
+  .page[data-view="admin"] > .a-factories{grid-column:span 5}
+  .cf-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .cf-split .cf-lists{border-right:.5px solid var(--line)}
+  .cf-split .cf-form{min-width:0}
+}

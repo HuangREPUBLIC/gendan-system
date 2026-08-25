@@ -70,17 +70,38 @@ async function apiAs(phone, method, p, body) {
   ok(!app().includes("SS27-T012"), "货号/款式名搜索框不再匹配工厂名");
   A.setFKw(""); await sleep(400);
 
-  // ---- 我的账号：职位 + 打卡记录 + 意见反馈 ----
+  // ---- 我的账号：职位 + 打卡记录 + 消息通知入口 ----
   window.go("account"); await sleep(500);
   ok(!app().includes("角色"), "全站不再出现「角色」字样");
   ok(app().includes(st().me.roleLabel), "我的账号显示职位名称");
   ok(app().includes("退出登录"), "我的页面有退出登录入口");
   ok(app().includes("我的打卡记录"), "打卡记录移到我的账号");
-  ok(app().includes("意见反馈"), "「我的」页有意见反馈入口");
-  A.submitFeedback(); await sleep(100);
-  doc.getElementById("m-input").value = "UI测试-建议增加导出定时任务";
-  await A.modalOk(); await sleep(400);
-  ok(!doc.getElementById("mask").classList.contains("show"), "反馈提交后弹窗关闭");
+  ok(!app().includes("意见反馈"), "「我的」页已移除意见反馈入口");
+  ok(typeof A.submitFeedback === "undefined", "提交反馈的前端函数已移除");
+  ok(app().includes("消息通知") && app().includes("go('notifs')"), "「我的」页有消息通知入口");
+
+  // ---- 桌面端骨架：侧边栏 + 顶部条 + 铃铛(窄屏由 CSS 隐藏，DOM 里始终在) ----
+  ok(!!doc.querySelector(".dsidebar") && !!doc.querySelector(".dheader"), "宽屏用的侧边栏和顶部条已渲染");
+  ok(!!doc.querySelector('.ds-item[data-nav="orders"]') && !!doc.querySelector('.ds-item[data-nav="admin"]'),
+    "侧边栏含订单列表/管理后台入口(管理员)");
+  ok(!!doc.getElementById("dh-kw") && !!doc.querySelector(".dh-icon"), "顶部条含全局搜索框和通知铃铛");
+  ok(app().includes('class="tabbar"') && app().includes('class="navbar"'), "手机端的底部 Tab 栏和标题栏依然保留(靠媒体查询切换)");
+
+  // ---- 消息通知：别人改动订单后本人收到，点开跳订单并标记已读 ----
+  const notiOrder = st().orders.find(o => o.values.styleNo === "SS27-T012");
+  await apiAs("13855556666", "POST", `/orders/${notiOrder.id}/logs`, { key: "cutting", text: "通知UI测试打卡" });
+  await A.refreshNotifUnread(); await sleep(300);
+  ok(st().notifs.unread >= 1, "同事改动订单后，管理员收到未读通知");
+  window.go("notifs"); await sleep(500);
+  ok(app().includes("王建国") && app().includes("裁剪进度"), "通知列表显示「谁在哪张单改了什么」");
+  ok(!!doc.querySelector(".notif.un"), "未读通知带未读标记");
+  const firstNoti = st().notifs.list.find(n => !n.read);
+  await A.openNotif(firstNoti.id, firstNoti.orderId); await sleep(500);
+  ok(window.eval("route.v") === "detail" && window.eval("route.id") === firstNoti.orderId, "点通知跳转到对应订单详情");
+  await A.refreshNotifUnread(); await sleep(300);
+  ok(st().notifs.list.find(n => n.id === firstNoti.id).read === true, "点过的通知已标记为已读");
+  await A.markAllNotifsRead(); await sleep(300);
+  ok(st().notifs.unread === 0, "「全部已读」把未读数清零");
 
   // ---- 管理后台：职位管理 ----
   window.go("admin"); await sleep(400);
@@ -108,17 +129,12 @@ async function apiAs(phone, method, p, body) {
   await A.modalOk(); await sleep(500);
   ok(!st().seasons.includes("SS2099UI"), "通过界面删除季节");
 
-  // ---- 管理后台：数据导出挪到员工账号/新增员工附近，且能看到刚提交的意见反馈 ----
+  // ---- 管理后台：数据导出挪到员工账号/新增员工附近；意见反馈已整个下线 ----
   ok(app().indexOf("数据导出") < app().indexOf("职位管理") && app().indexOf("数据导出") < app().indexOf("季节管理"),
     "数据导出已挪到员工账号/新增员工附近，排在职位管理/季节管理前面");
   ok(!!doc.getElementById("exp-season"), "数据导出带季节筛选下拉");
   await sleep(300);
-  ok(app().includes("意见反馈") && app().includes("UI测试-建议增加导出定时任务") && app().includes("王建国"),
-    "管理员能在后台看到刚提交的意见反馈，带提交人姓名");
-  ok(app().includes("标记已处理"), "反馈列表带「标记已处理」按钮");
-  const fbId = st().feedback.find(f => f.text === "UI测试-建议增加导出定时任务").id;
-  await A.toggleFeedbackHandled(fbId, true); await sleep(400);
-  ok(app().includes("已处理") && app().includes("标记未处理"), "标记已处理后显示「已处理」，按钮变成「标记未处理」");
+  ok(!app().includes("意见反馈") && !app().includes("标记已处理"), "管理后台已移除意见反馈区块");
 
   // ---- 打卡记录按订单分组显示（王建国在两个不同订单上都有打卡） ----
   const wang = st().users.find(u => u.name === "王建国");
@@ -333,16 +349,7 @@ async function apiAs(phone, method, p, body) {
   await A.modalOk(); await sleep(500);
   ok(app().includes("UI测试-已整改"), "下厂员通过界面填写的整改情况显示出来");
 
-  // 王建国自己提交一条反馈，管理员标记已处理后，王建国在「我的」页应该能看到已处理
-  A.submitFeedback(); await sleep(100);
-  doc.getElementById("m-input").value = "UI测试-王建国自己的反馈";
-  await A.modalOk(); await sleep(400);
-  const wangFbId = (await apiAs("13800000000", "GET", "/feedback")).j.find(f => f.text === "UI测试-王建国自己的反馈").id;
-  await apiAs("13800000000", "PATCH", `/feedback/${wangFbId}`, { handled: true });
-
   window.go("account"); await sleep(600);
-  ok(app().includes("UI测试-王建国自己的反馈") && app().includes("已处理"),
-    "提交人在「我的」页能看到自己提交的反馈已被管理员标记处理");
   ok(!app().includes("不点退出的话"), "已移除登录状态说明文字");
   ok(!app().includes("服装生产进度") && !app().includes("一对一私聊")
      && !app().includes("职位可直接下拉修改") && !app().includes("员工离职请用")

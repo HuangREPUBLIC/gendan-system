@@ -248,6 +248,53 @@ async function call(method, path, token, body) {
   const tempSalesRole = rolesNow.find(r => r.label === "测试业务员职位");
   if (tempSalesRole) await call("DELETE", `/roles/${tempSalesRole.k}`, aT);
 
+  // ---- 应用内通知：订单被别人改动时，相关人员收到提醒，操作者自己不收 ----
+  const nOrder = await call("POST", "/orders", sT, { season: "SS2027", values: { styleNo: "NOTIF-1", styleName: "通知测试款", follower: wang.id } });
+  ok(nOrder.status === 200, "创建通知测试订单");
+  const nId = nOrder.j.id;
+  const unreadOf = async t => (await call("GET", "/notifications/unread-count", t)).j.total;
+  const listOf = async t => (await call("GET", "/notifications", t)).j;
+
+  await call("POST", "/notifications/read-all", wT);   // 先清干净，方便下面数增量
+  await call("POST", "/notifications/read-all", sT);
+  await call("POST", "/notifications/read-all", aT);
+  ok(await unreadOf(wT) === 0, "标记全部已读后未读数归零");
+
+  // 业务员(陈晓芳)改单 -> 下厂员(王建国)/管理员(老板)收到，操作者自己不收
+  ok((await call("PATCH", `/orders/${nId}`, sT, { values: { shipDate: "2026-10-01" } })).status === 200, "业务员改发货日期(触发通知)");
+  ok(await unreadOf(wT) === 1, "本单下厂员收到一条通知");
+  ok(await unreadOf(aT) === 1, "管理员也收到通知");
+  ok(await unreadOf(sT) === 0, "操作者自己不会收到自己改动的通知");
+  const wNotifs = await listOf(wT);
+  ok(wNotifs[0].orderId === nId && wNotifs[0].text.includes("陈晓芳") && wNotifs[0].text.includes("NOTIF-1")
+    && wNotifs[0].text.includes("发货日期"), "通知内容说清了谁在哪张单改了什么，并带上订单 id 供跳转");
+  ok(wNotifs[0].read === false, "新通知默认未读");
+
+  // 打卡 / 验货 / 跟单小结 也会触发通知
+  ok((await call("POST", `/orders/${nId}/logs`, wT, { key: "cutting", text: "通知测试打卡" })).status === 200, "下厂员打卡(触发通知)");
+  ok((await call("POST", `/orders/${nId}/inspections`, sT, { problems: ["通知测试问题"] })).status === 200, "新增验货问题(触发通知)");
+  ok((await call("POST", `/orders/${nId}/follow`, sT, { text: "通知测试跟单" })).status === 200, "新增跟单小结(触发通知)");
+  const sNotifs = await listOf(sT);
+  ok(sNotifs.some(n => n.text.includes("王建国") && n.text.includes("裁剪进度")), "打卡会通知到本单业务员，并写明是哪个环节");
+  ok(await unreadOf(wT) === 3, "验货问题/跟单小结也会通知到下厂员(共3条：改单+验货+跟单)");
+  ok(sNotifs.length > 0 && sNotifs[0].createdAt >= sNotifs[sNotifs.length - 1].createdAt, "通知列表按时间倒序");
+
+  // 标记单条已读 / 全部已读
+  const oneId = (await listOf(wT)).find(n => !n.read).id;
+  ok((await call("POST", `/notifications/${oneId}/read`, wT)).status === 200, "标记单条通知已读");
+  ok(await unreadOf(wT) === 2, "标记单条后未读数减一");
+  ok((await call("POST", `/notifications/${oneId}/read`, sT)).status === 403, "不能标记别人的通知为已读");
+  ok((await call("POST", "/notifications/xxx-not-exist/read", wT)).status === 404, "标记不存在的通知返回404");
+  ok((await call("POST", "/notifications/read-all", wT)).status === 200, "标记全部已读");
+  ok(await unreadOf(wT) === 0, "全部已读后未读数归零");
+  ok((await call("GET", "/notifications", null)).status === 401, "未登录不能读通知列表");
+
+  // ---- 意见反馈功能已整个下线：相关接口一律不存在(404)，不能有任何残留入口 ----
+  ok((await call("POST", "/feedback", aT, { text: "还能提交吗" })).status === 404, "提交反馈接口已下线");
+  ok((await call("GET", "/feedback", aT)).status === 404, "查看反馈列表接口已下线");
+  ok((await call("GET", "/feedback/mine", aT)).status === 404, "查看自己反馈的接口已下线");
+  ok((await call("PATCH", "/feedback/anyid", aT, { handled: true })).status === 404, "标记反馈已处理的接口已下线");
+
   // no-token blocked
   ok((await call("GET", "/bootstrap", null)).status === 401, "未登录被拦截");
   // 安全：公网"凭手机号自助改密"已移除（原来可盗号）

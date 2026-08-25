@@ -54,14 +54,16 @@ db.exec(`
     updated_at INTEGER NOT NULL,
     data TEXT NOT NULL
   );
-  CREATE TABLE IF NOT EXISTS feedback (
+  CREATE TABLE IF NOT EXISTS notifications (
     id TEXT PRIMARY KEY,
-    by_user TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    order_id TEXT,
     text TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    handled INTEGER NOT NULL DEFAULT 0,
-    handled_at INTEGER
+    read_at INTEGER
   );
+  CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_notif_unread ON notifications(user_id, read_at);
 `);
 
 const uid = () => crypto.randomBytes(9).toString("base64url");
@@ -102,12 +104,6 @@ function ensureDefaults() {
   if (!columnExists("messages", "attachment")) {
     db.exec("ALTER TABLE messages ADD COLUMN attachment TEXT");
     console.log("[db] 已为 messages 表补上 attachment 列");
-  }
-  // 老库补列：意见反馈的已处理标记
-  if (!columnExists("feedback", "handled")) {
-    db.exec("ALTER TABLE feedback ADD COLUMN handled INTEGER NOT NULL DEFAULT 0");
-    db.exec("ALTER TABLE feedback ADD COLUMN handled_at INTEGER");
-    console.log("[db] 已为 feedback 表补上已处理标记列");
   }
   const roles = getSetting("roles", null);
   if (!roles || !roles.length) {

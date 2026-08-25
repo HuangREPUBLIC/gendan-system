@@ -39,30 +39,6 @@ async function call(m,p,t,b){const h={"Content-Type":"application/json"};if(t)h.
   ok((await call("DELETE","/seasons/"+encodeURIComponent("FW2099"),wT)).status===403,"非管理员不能删季节");
   ok((await call("DELETE","/seasons/"+encodeURIComponent("FW2099"),aT)).status===200,"无人使用可删除季节");
 
-  // 意见反馈：任何登录用户可提交，只有管理员能看列表
-  ok((await call("POST","/feedback",null,{text:"未登录不能提交"})).status===401,"未登录不能提交反馈");
-  ok((await call("POST","/feedback",wT,{text:""})).status===400,"空反馈内容被拒");
-  const fb=await call("POST","/feedback",wT,{text:"建议加一个导出按季度筛选的功能"});
-  ok(fb.status===200,"下厂员可以提交反馈");
-  await call("POST","/feedback",aT,{text:"管理员自己也能提交"});
-  ok((await call("GET","/feedback",wT)).status===403,"非管理员不能查看反馈列表");
-  const fbList=await call("GET","/feedback",aT);
-  ok(fbList.status===200 && fbList.j.length>=2,"管理员能看到全部反馈");
-  ok(fbList.j.some(f=>f.text==="建议加一个导出按季度筛选的功能" && f.byName==="王建国"),"反馈内容和提交人姓名正确");
-  ok(fbList.j.every(f=>f.handled===false),"新反馈默认未处理");
-  const fbId=fbList.j.find(f=>f.text==="建议加一个导出按季度筛选的功能").id;
-
-  // 意见反馈：提交人能查看自己的反馈(含处理状态)，看不到别人的；管理员能标记已处理
-  const mine=await call("GET","/feedback/mine",wT);
-  ok(mine.status===200 && mine.j.length===1 && mine.j[0].text==="建议加一个导出按季度筛选的功能" && mine.j[0].handled===false,
-    "提交人能看到自己的反馈，默认未处理");
-  ok((await call("PATCH",`/feedback/${fbId}`,wT,{handled:true})).status===403,"非管理员不能标记已处理");
-  ok((await call("PATCH",`/feedback/${fbId}`,aT,{handled:true})).status===200,"管理员可以标记已处理");
-  const mineAfter=await call("GET","/feedback/mine",wT);
-  ok(mineAfter.j[0].handled===true,"提交人能看到自己的反馈已被标记处理");
-  ok((await call("PATCH",`/feedback/${fbId}`,aT,{handled:false})).status===200,"管理员可以再标记回未处理");
-  ok((await call("PATCH","/feedback/不存在的id",aT,{handled:true})).status===404,"标记不存在的反馈报错");
-
   // 聊天
   const cT=(await call("POST","/login",null,{phone:"13811112222",password:"123456"})).j.token; // 陈晓芳
   let contacts=(await call("GET","/chat/contacts",aT)).j;

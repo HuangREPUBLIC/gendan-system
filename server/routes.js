@@ -242,6 +242,46 @@ function emptyOrderData(values) {
   return { values: values || {}, logs, mainLog: [], subs: [], inspections: [], followIssues: [] };
 }
 
+/* ---------- 应用内通知 ----------
+ * 订单被别人动过之后，给这张单的"相关人员"各生成一条通知：
+ *   本单业务员(values.sales) / 下厂员(values.follower) / 创建人(created_by) + 所有主管/管理员。
+ * 不通知操作者本人（自己改的自己知道）。颗粒度只到"谁在哪张单做了什么"，不做逐字段 diff。
+ * 通知只是提醒，写失败不能连累主流程（订单本身已经保存成功了），所以整段包在 try 里。
+ */
+function orderLabel(o) {
+  const v = (o.data && o.data.values) || {};
+  return v.styleNo || v.styleName || o.id;
+}
+function fieldLabelOf(key) {
+  const f = getSetting("fields", { order: [], production: [] });
+  const hit = [...f.order, ...f.production].find(x => x.k === key);
+  return hit ? hit.label : key;
+}
+// 打卡的"环节"名字：本厂 / 加工点名字 / 进度字段名
+function logLabelOf(o, key) {
+  if (key === "mainLog") return "本厂";
+  if (String(key).startsWith("sub:")) {
+    const sub = (o.data.subs || []).find(x => x.id === String(key).slice(4));
+    return sub ? sub.name : "加工点";
+  }
+  return fieldLabelOf(key);
+}
+function notifyOrder(actor, o, what) {
+  try {
+    const v = (o.data && o.data.values) || {};
+    const ids = new Set([v.sales, v.follower, o.created_by].filter(Boolean));
+    db.prepare("SELECT id, role FROM users WHERE deleted = 0").all().forEach(u => {
+      if (u.role === "admin" || A.roleTemplate(u.role) === "supervisor") ids.add(u.id);
+    });
+    ids.delete(actor.id);
+    if (!ids.size) return;
+    const text = `${actor.name} 在 ${orderLabel(o)} ${what}`;
+    const now = Date.now();
+    const stmt = db.prepare("INSERT INTO notifications(id,user_id,order_id,text,created_at,read_at) VALUES(?,?,?,?,?,NULL)");
+    ids.forEach(uid2 => stmt.run(uid(), uid2, o.id, text, now));
+  } catch (e) { console.error("[notify] 生成通知失败", e); }
+}
+
 /* =========================================================
  *  认证相关（无需登录）
  * ========================================================= */
@@ -276,42 +316,6 @@ router.post("/password/change", (req, res) => {
   if (!newPassword || String(newPassword).length < 4) return res.status(400).json({ error: "新密码至少 4 位" });
   db.prepare("UPDATE users SET password_hash=? WHERE id=?").run(A.hashPassword(newPassword), req.user.id);
   res.json({ ok: true });
-});
-
-/* =========================================================
- *  意见反馈：任何登录用户可提交/查看自己的；管理员能看全部、标记已处理
- * ========================================================= */
-router.post("/feedback", (req, res) => {
-  const text = String((req.body || {}).text || "").trim();
-  if (!text) return res.status(400).json({ error: "请填写反馈内容" });
-  db.prepare("INSERT INTO feedback(id,by_user,text,created_at) VALUES(?,?,?,?)")
-    .run(uid(), req.user.id, text, Date.now());
-  res.json({ ok: true });
-});
-
-router.get("/feedback", A.adminRequired, (req, res) => {
-  const users = db.prepare("SELECT id,name FROM users").all();
-  const nameOf = id => (users.find(u => u.id === id) || {}).name || id || "";
-  const rows = db.prepare("SELECT * FROM feedback ORDER BY created_at DESC").all()
-    .map(r => ({ id: r.id, text: r.text, createdAt: r.created_at, byName: nameOf(r.by_user),
-      handled: !!r.handled, handledAt: r.handled_at }));
-  res.json(rows);
-});
-
-// 提交人查看自己提交过的反馈，能看到管理员是否已处理
-router.get("/feedback/mine", (req, res) => {
-  const rows = db.prepare("SELECT * FROM feedback WHERE by_user = ? ORDER BY created_at DESC").all(req.user.id)
-    .map(r => ({ id: r.id, text: r.text, createdAt: r.created_at, handled: !!r.handled, handledAt: r.handled_at }));
-  res.json(rows);
-});
-
-router.patch("/feedback/:id", A.adminRequired, (req, res) => {
-  const row = db.prepare("SELECT * FROM feedback WHERE id = ?").get(req.params.id);
-  if (!row) return res.status(404).json({ error: "反馈不存在" });
-  const handled = !!(req.body || {}).handled;
-  db.prepare("UPDATE feedback SET handled = ?, handled_at = ? WHERE id = ?")
-    .run(handled ? 1 : 0, handled ? Date.now() : null, req.params.id);
-  res.json({ ok: true, handled });
 });
 
 /* =========================================================
@@ -527,6 +531,14 @@ router.patch("/orders/:id", (req, res) => {
     o.data.values = Object.assign({}, o.data.values, values);
   }
   saveOrder(o);
+  // 通知相关人员：只改了一个字段就说清楚是哪个字段，改了一堆就笼统说"修改了订单信息"
+  const changed = (values && typeof values === "object") ? Object.keys(values) : [];
+  if (changed.length || season !== undefined) {
+    const what = (changed.length === 1 && season === undefined)
+      ? `修改了「${fieldLabelOf(changed[0])}」`
+      : "修改了订单信息";
+    notifyOrder(req.user, o, what);
+  }
   res.json(orderPublic(loadOrder(o.id)));
 });
 
@@ -557,6 +569,7 @@ router.post("/orders/:id/logs", (req, res) => {
   } else if (!t && !photos.length) return res.status(400).json({ error: "请填写打卡内容或添加照片" });
   list.push(entry);
   saveOrder(o);
+  notifyOrder(req.user, o, `更新了「${logLabelOf(o, key)}」`);
   res.json(orderPublic(loadOrder(o.id)));
 });
 
@@ -639,6 +652,7 @@ router.post("/orders/:id/inspections", (req, res) => {
   }));
   o.data.inspections.push({ id: uid(), t: now, by: req.user.id, byName: req.user.name, photos: inspPhotos, items });
   saveOrder(o);
+  notifyOrder(req.user, o, "新增了验货问题");
   res.json(orderPublic(loadOrder(o.id)));
 });
 
@@ -651,20 +665,22 @@ router.patch("/orders/:id/inspections/:instId/items/:itemId", (req, res) => {
   if (!item) return res.status(404).json({ error: "记录不存在" });
   const body = req.body || {};
   let touched = false;
+  const whats = [];
   if (body.problem !== undefined) {
     if (!A.canWriteInspProblem(req.user, o)) return res.status(403).json({ error: "无权修改发现的问题" });
     const v = String(body.problem).trim();
     if (!v) return res.status(400).json({ error: "发现的问题不能为空" });
     item.problem = v; item.problemBy = req.user.id; item.problemByName = req.user.name; item.problemAt = Date.now();
-    touched = true;
+    touched = true; whats.push("修改了验货问题");
   }
   if (body.fix !== undefined) {
     if (!A.canWriteInspFix(req.user, o)) return res.status(403).json({ error: "只有本单负责下厂员或管理员可以填写整改情况" });
     item.fix = String(body.fix).trim(); item.fixBy = req.user.id; item.fixByName = req.user.name; item.fixAt = Date.now();
-    touched = true;
+    touched = true; whats.push("填写了验货整改情况");
   }
   if (!touched) return res.status(400).json({ error: "没有可修改的内容" });
   saveOrder(o);
+  notifyOrder(req.user, o, whats.join("、"));
   res.json(orderPublic(loadOrder(o.id)));
 });
 
@@ -704,6 +720,7 @@ router.post("/orders/:id/follow", (req, res) => {
   if (!t && !photos.length) return res.status(400).json({ error: "请填写内容或添加照片" });
   o.data.followIssues.push({ id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text: t, photos });
   saveOrder(o);
+  notifyOrder(req.user, o, "新增了跟单小结");
   res.json(orderPublic(loadOrder(o.id)));
 });
 
@@ -813,6 +830,36 @@ router.post("/chat/with/:userId", (req, res) => {
   if (text.length > 2000) return res.status(400).json({ error: "消息太长了" });
   db.prepare("INSERT INTO messages(id,from_user,to_user,text,attachment,created_at,read_at) VALUES(?,?,?,?,?,?,NULL)")
     .run(uid(), meId, otherId, text, att ? JSON.stringify(att) : null, Date.now());
+  res.json({ ok: true });
+});
+
+/* =========================================================
+ *  应用内通知：订单被别人改动时收到提醒，点开跳到对应订单
+ * ========================================================= */
+const NOTIF_LIMIT = 50;   // 只给最近 50 条，够用又不会让列表无限长
+
+router.get("/notifications", (req, res) => {
+  const rows = db.prepare(`SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ${NOTIF_LIMIT}`)
+    .all(req.user.id);
+  res.json(rows.map(r => ({ id: r.id, orderId: r.order_id, text: r.text, createdAt: r.created_at, read: !!r.read_at })));
+});
+
+// 未读总数（给红点轮询用，跟 /chat/unread 一个套路）
+router.get("/notifications/unread-count", (req, res) => {
+  const c = db.prepare("SELECT COUNT(*) c FROM notifications WHERE user_id = ? AND read_at IS NULL").get(req.user.id).c;
+  res.json({ total: c });
+});
+
+router.post("/notifications/read-all", (req, res) => {
+  db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(Date.now(), req.user.id);
+  res.json({ ok: true });
+});
+
+router.post("/notifications/:id/read", (req, res) => {
+  const row = db.prepare("SELECT * FROM notifications WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "通知不存在" });
+  if (row.user_id !== req.user.id) return res.status(403).json({ error: "无权操作这条通知" });
+  if (!row.read_at) db.prepare("UPDATE notifications SET read_at = ? WHERE id = ?").run(Date.now(), row.id);
   res.json({ ok: true });
 });
 
