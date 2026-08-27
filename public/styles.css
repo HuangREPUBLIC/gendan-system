@@ -79,6 +79,7 @@ a{color:var(--blue-2);text-decoration:none}
 }
 .nav-btn:active{opacity:.4}
 .nav-btn.plus{font-size:26px;line-height:1;padding:4px 8px}
+.dbreadcrumb{display:none}
 
 /* ---------- 页面容器 ---------- */
 .page{max-width:820px;margin:0 auto;padding:14px 14px calc(78px + var(--safe-b));}
@@ -536,6 +537,15 @@ table.tbl{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
   .navbar-in{max-width:none;padding:22px 28px 6px;height:auto}
   .nav-title{text-align:left;font-size:23px;font-weight:700;letter-spacing:-.03em}
   .nav-slot{min-width:0}
+  /* 桌面端侧边栏已经能直接跳转到任何页面，"‹ 返回上一页"这种手机手势式按钮没有意义，
+     换成面包屑（父级仍可点回去，同时显示当前所在位置），右侧操作按钮（＋新建/全部已读等）保留 */
+  .nav-slot:not(.right){display:none}
+  .dbreadcrumb{display:flex;align-items:center;gap:6px;margin-left:var(--side-w);
+    padding:16px 28px 0;font-size:13px;color:var(--ink-2)}
+  .dbc-link{background:none;border:0;padding:0;font:inherit;color:var(--blue-2);cursor:pointer}
+  .dbc-link:hover{text-decoration:underline}
+  .dbc-sep{color:var(--ink-3)}
+  .dbc-current{color:var(--ink-2)}
   .page{max-width:none;margin:0 0 0 var(--side-w);padding:8px 28px 40px}
   .page.chat-full{height:calc(100dvh - var(--dh-h) - 74px);padding:0 28px 24px}
   .page.chat-full .chat-card{border-radius:var(--radius-lg)}

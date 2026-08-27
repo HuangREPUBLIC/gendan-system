@@ -521,24 +521,28 @@ function go(v, id) {
   if (v === "notifs") A.loadNotifs();
 }
 
-/* 每个页面的标题栏配置 */
+/* 每个页面的标题栏配置
+ * crumb：桌面端侧边栏常驻导航，不需要手机端那种"‹ 返回上一页"手势，
+ * 所以额外给出面包屑用的 {label, fn}（跟 left 的返回按钮指向同一个父级），
+ * 桌面端 CSS 会隐藏 left 返回按钮、改显示这个面包屑；手机端渲染逻辑完全不变。 */
 function pageMeta() {
   const back = (label, fn) => `<button class="nav-btn" onclick="${fn}">‹ ${esc(label)}</button>`;
+  const crumb = (label, fn) => ({ label, fn });
   switch (route.v) {
     case "orders": return { title: "订单",
       right: canCreateOrder() ? `<button class="nav-btn plus" title="新建订单" onclick="go('new')">＋</button>` : "" };
-    case "new": return { title: "新建订单", left: back("订单", "go('orders')") };
-    case "detail": return { title: "订单详情", left: back("订单", "go('orders')") };
+    case "new": return { title: "新建订单", left: back("订单", "go('orders')"), crumb: crumb("订单", "go('orders')") };
+    case "detail": return { title: "订单详情", left: back("订单", "go('orders')"), crumb: crumb("订单", "go('orders')") };
     case "chat": return state.chat.activeId
-      ? { title: (state.chat.contact && state.chat.contact.name) || "聊天", left: back("聊天", "A.closeChat()") }
+      ? { title: (state.chat.contact && state.chat.contact.name) || "聊天", left: back("聊天", "A.closeChat()"), crumb: crumb("聊天", "A.closeChat()") }
       : { title: "聊天" };
     case "admin": return { title: "管理后台" };
     case "account": return { title: "我的" };
-    case "notifs": return { title: "消息通知", left: back("我的", "go('account')"),
+    case "notifs": return { title: "消息通知", left: back("我的", "go('account')"), crumb: crumb("我的", "go('account')"),
       right: state.notifs.unread ? `<button class="nav-btn" onclick="A.markAllNotifsRead()">全部已读</button>` : "" };
     case "staffLogs": {
       const u = userById(route.id);
-      return { title: (u ? u.name : "") + "的打卡", left: back("管理", "go('admin')") };
+      return { title: (u ? u.name : "") + "的打卡", left: back("管理", "go('admin')"), crumb: crumb("管理", "go('admin')") };
     }
     default: return { title: "订单" };
   }
@@ -645,6 +649,7 @@ function render() {
   app.innerHTML = `
     ${sidebarHtml()}${deskHeaderHtml()}
     ${route.v === "orders" ? `<div class="home-brand"><div class="co">${esc(COMPANY_NAME)}</div><div class="app">${esc(APP_NAME)}</div></div>` : ""}
+    ${meta.crumb ? `<nav class="dbreadcrumb"><button class="dbc-link" onclick="${meta.crumb.fn}">${esc(meta.crumb.label)}</button><span class="dbc-sep">›</span><span class="dbc-current">${esc(meta.title)}</span></nav>` : ""}
     <header class="navbar"><div class="navbar-in">
       <div class="nav-slot">${meta.left || ""}</div>
       <h1 class="nav-title">${esc(meta.title)}</h1>

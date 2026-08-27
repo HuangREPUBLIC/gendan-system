@@ -1,5 +1,5 @@
 // 版本号变了就会丢弃旧缓存。改动前端后 bump 这个数字。
-const CACHE = "daka-v3";
+const CACHE = "daka-v4";
 const SHELL = ["/", "/index.html", "/app.js", "/styles.css",
   "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"];
 
