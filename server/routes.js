@@ -257,6 +257,37 @@ function fieldLabelOf(key) {
   const hit = [...f.order, ...f.production].find(x => x.k === key);
   return hit ? hit.label : key;
 }
+// "season" 是订单上单独的一列，不在自定义字段列表里，通知文案里要单独给它一个说得清的名字
+function changeLabelOf(key) { return key === "season" ? "订单季节" : fieldLabelOf(key); }
+function fieldTypeOf(key) {
+  if (key === "season") return "season";
+  const f = getSetting("fields", { order: [], production: [] });
+  const hit = [...f.order, ...f.production].find(x => x.k === key);
+  return hit ? hit.type : null;
+}
+// 日期字符串 2026-08-15 -> 2026年8月15日，跟前端 fmtDate 保持一致的展示格式
+function fmtDateVal(v) {
+  const m = String(v).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  return m ? `${m[1]}年${+m[2]}月${+m[3]}日` : String(v);
+}
+// 通知里"改成了 XX"这个新值该怎么显示：
+// 图片/打卡类字段不适合把值塞进一句话通知里，返回 null 表示只报字段名、不带值；
+// 业务员/下厂员存的是用户 id，要查回姓名；文字类值太长会截断，避免通知被撑得很长
+function fieldValueText(key, value) {
+  if (value === undefined || value === null || String(value).trim() === "") return "（清空）";
+  const type = fieldTypeOf(key);
+  if (type === "image" || type === "log") return null;
+  let s;
+  if (type === "user-sales" || type === "user-follower") {
+    const u = db.prepare("SELECT name FROM users WHERE id = ?").get(value);
+    s = u ? u.name : String(value);
+  } else if (type === "date") {
+    s = fmtDateVal(value);
+  } else {
+    s = String(value);
+  }
+  return s.length > 20 ? s.slice(0, 20) + "…" : s;
+}
 // 打卡的"环节"名字：本厂 / 加工点名字 / 进度字段名
 function logLabelOf(o, key) {
   if (key === "mainLog") return "本厂";
@@ -275,10 +306,11 @@ function notifyOrder(actor, o, what) {
     });
     ids.delete(actor.id);
     if (!ids.size) return;
-    const text = `${actor.name} 在 ${orderLabel(o)} ${what}`;
+    const label = orderLabel(o);
+    const text = `${actor.name} 在 ${label} ${what}`;
     const now = Date.now();
-    const stmt = db.prepare("INSERT INTO notifications(id,user_id,order_id,text,created_at,read_at) VALUES(?,?,?,?,?,NULL)");
-    ids.forEach(uid2 => stmt.run(uid(), uid2, o.id, text, now));
+    const stmt = db.prepare("INSERT INTO notifications(id,user_id,order_id,text,created_at,read_at,actor_name,order_label,what) VALUES(?,?,?,?,?,NULL,?,?,?)");
+    ids.forEach(uid2 => stmt.run(uid(), uid2, o.id, text, now, actor.name, label, what));
   } catch (e) { console.error("[notify] 生成通知失败", e); }
 }
 
@@ -531,12 +563,23 @@ router.patch("/orders/:id", (req, res) => {
     o.data.values = Object.assign({}, o.data.values, values);
   }
   saveOrder(o);
-  // 通知相关人员：只改了一个字段就说清楚是哪个字段，改了一堆就笼统说"修改了订单信息"
-  const changed = (values && typeof values === "object") ? Object.keys(values) : [];
-  if (changed.length || season !== undefined) {
-    const what = (changed.length === 1 && season === undefined)
-      ? `修改了「${fieldLabelOf(changed[0])}」`
-      : "修改了订单信息";
+  // 通知相关人员：只改了一个字段就说清楚改成了什么值；改了好几个字段就把字段名都列出来，
+  // 而不是笼统一句"修改了订单信息"——不然收到通知的人根本不知道要去看哪里
+  const changedKeys = (values && typeof values === "object") ? Object.keys(values) : [];
+  if (season !== undefined) changedKeys.unshift("season");
+  if (changedKeys.length) {
+    let what;
+    if (changedKeys.length === 1) {
+      const key = changedKeys[0];
+      const val = key === "season" ? o.season : values[key];
+      const valText = fieldValueText(key, val);
+      what = valText ? `把「${changeLabelOf(key)}」改成了${valText}` : `修改了「${changeLabelOf(key)}」`;
+    } else {
+      const labels = changedKeys.map(changeLabelOf);
+      what = labels.length > 3
+        ? `修改了「${labels.slice(0, 3).join("、")}」等${labels.length}项`
+        : `修改了「${labels.join("、")}」`;
+    }
     notifyOrder(req.user, o, what);
   }
   res.json(orderPublic(loadOrder(o.id)));
@@ -841,7 +884,12 @@ const NOTIF_LIMIT = 50;   // 只给最近 50 条，够用又不会让列表无�
 router.get("/notifications", (req, res) => {
   const rows = db.prepare(`SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ${NOTIF_LIMIT}`)
     .all(req.user.id);
-  res.json(rows.map(r => ({ id: r.id, orderId: r.order_id, text: r.text, createdAt: r.created_at, read: !!r.read_at })));
+  // actorName/orderLabel/what 是给更精致的通知卡片用的结构化字段；老通知这几列可能是 NULL，
+  // 前端遇到 NULL 时会退回纯文本 text 展示，所以这里原样传 null，不用兜底成空字符串
+  res.json(rows.map(r => ({
+    id: r.id, orderId: r.order_id, text: r.text, createdAt: r.created_at, read: !!r.read_at,
+    actorName: r.actor_name, orderLabel: r.order_label, what: r.what
+  })));
 });
 
 // 未读总数（给红点轮询用，跟 /chat/unread 一个套路）

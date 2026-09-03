@@ -105,6 +105,14 @@ function ensureDefaults() {
     db.exec("ALTER TABLE messages ADD COLUMN attachment TEXT");
     console.log("[db] 已为 messages 表补上 attachment 列");
   }
+  // 老库补列：通知的结构化字段(谁/哪张单/做了什么)，供前端做更精致的展示；
+  // 老通知这几列会是 NULL，前端会退回到纯文本 text 展示
+  if (!columnExists("notifications", "actor_name")) {
+    db.exec("ALTER TABLE notifications ADD COLUMN actor_name TEXT");
+    db.exec("ALTER TABLE notifications ADD COLUMN order_label TEXT");
+    db.exec("ALTER TABLE notifications ADD COLUMN what TEXT");
+    console.log("[db] 已为 notifications 表补上 actor_name/order_label/what 列");
+  }
   const roles = getSetting("roles", null);
   if (!roles || !roles.length) {
     setSetting("roles", DEFAULT_ROLES);

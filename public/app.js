@@ -610,15 +610,26 @@ function sidebarHtml() {
       <div class="ds-me"><div class="ds-me-name">${esc(m.name)}</div><div class="ds-me-role">${esc(roleLabelOf(m))}</div></div>
     </div></aside>`;
 }
+// actorName/orderLabel/what 存在时用"头像 + 姓名 + 订单号胶囊 + 具体改了什么"的卡片式展示；
+// 老通知(升级前生成的)这几列是 NULL，退回最初的纯文本单行展示，不强行拼凑
 function notifItemsHtml() {
   const list = state.notifs.list;
   if (!list) return `<div class="empty">加载中…</div>`;
   if (!list.length) return `<div class="empty">暂无通知</div>`;
-  return list.map(n => `<div class="notif${n.read ? "" : " un"}" role="button" tabindex="0"
-    onclick="A.openNotif('${n.id}','${esc(n.orderId || "")}')">
-    <span class="n-dot"></span>
-    <div class="n-main"><div class="n-text">${esc(n.text)}</div>
-      <div class="n-time num">${fmtT(n.createdAt)}</div></div></div>`).join("");
+  return list.map(n => {
+    const rich = !!(n.actorName && n.orderLabel && n.what);
+    return `<div class="notif${rich ? " rich" : ""}${n.read ? "" : " un"}" role="button" tabindex="0"
+      onclick="A.openNotif('${n.id}','${esc(n.orderId || "")}')">
+      ${rich ? avatarHtml(n.actorName, "sm") : `<span class="n-dot"></span>`}
+      <div class="n-main">${rich ? `
+        <div class="n-top"><span class="n-actor">${esc(n.actorName)}</span>
+          <span class="tag order num">${esc(n.orderLabel)}</span>
+          <span class="n-time num">${fmtT(n.createdAt)}</span></div>
+        <div class="n-what">${esc(n.what)}</div>` : `
+        <div class="n-text">${esc(n.text)}</div>
+        <div class="n-time num">${fmtT(n.createdAt)}</div>`}
+      </div></div>`;
+  }).join("");
 }
 function deskHeaderHtml() {
   const n = state.notifs;
