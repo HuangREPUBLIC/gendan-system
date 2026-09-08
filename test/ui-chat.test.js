@@ -103,21 +103,38 @@ async function apiAs(phone, method, p, body) {
   await A.markAllNotifsRead(); await sleep(300);
   ok(st().notifs.unread === 0, "「全部已读」把未读数清零");
 
-  // ---- 管理后台：职位管理 ----
+  // ---- 管理后台：分组导航 + 职位/权限 ----
   window.go("admin"); await sleep(400);
-  ok(app().includes("职位管理") && app().includes("权限模板"), "管理后台有职位管理");
   ok(app().includes("<th>职位</th>") && !app().includes("<th>角色</th>"), "员工表表头是「职位」");
+  ok(["人员", "权限", "表单配置", "数据"].every(t => app().includes(`>${t}</button>`)), "管理页有四个分组导航");
+  A.setAdminTab("perms"); await sleep(200);
+  ok(app().includes("权限模板") && app().includes("权限配置"), "切到「权限」分组能看到职位与权限配置");
+  // 权限开关：改字段和打卡是两个独立开关，这是能配出"能打卡但不能改字段"的关键
+  ok(app().includes("在「二、生产明细」打卡") && app().includes("改「二、生产明细」"),
+    "打卡权限和编辑权限是分开的两个开关");
+  const salesRole = st().roles.find(r => r.template === "sales");
+  await A.setRolePerm(salesRole.k, "logProd", true); await sleep(500);
+  const savedRole = st().roles.find(r => r.k === salesRole.k);
+  ok(savedRole.perms && savedRole.perms.logProd === true, "打开「在生产明细打卡」后配置已保存");
+  ok(savedRole.perms.editProd === false, "只开打卡权，改字段权保持原样没被顺带打开");
+  A.setAdminTab("perms"); await sleep(200);
+  ok(app().includes("已自定义"), "改过权限的职位标出「已自定义」");
+  await A.setRolePerm(salesRole.k, "logProd", false); await sleep(400);
+  A.setAdminTab("perms"); await sleep(200);
   doc.getElementById("nr-label").value = "跟单主管";
   doc.getElementById("nr-template").value = "sales";
   await A.addRole(); await sleep(600);
   ok(st().roles.some(r => r.label === "跟单主管"), "新增自定义职位");
+  // 员工职位下拉在「人员」分组里
+  A.setAdminTab("people"); await sleep(200);
   const chen = st().users.find(u => u.name === "陈晓芳");
   const sel = [...doc.querySelectorAll("select")].find(s => s.outerHTML.includes(chen.id));
   ok(sel && [...sel.options].some(o => o.textContent === "跟单主管"), "自定义职位出现在员工职位下拉里");
   ok(app().includes("查看打卡"), "管理员可查看员工打卡");
 
-  // ---- 管理后台：季节管理（新增/删除，且新建订单里能选到） ----
-  ok(app().includes("季节管理"), "管理后台有季节管理入口");
+  // ---- 管理后台：季节（新增/删除，且新建订单里能选到） ----
+  A.setAdminTab("form"); await sleep(200);
+  ok(app().includes("季节") && app().includes("自定义字段"), "「表单配置」分组里有季节和自定义字段");
   doc.getElementById("ns-name").value = "SS2099UI";
   await A.addSeason(); await sleep(500);
   ok(st().seasons.includes("SS2099UI"), "通过界面新增季节");
@@ -129,9 +146,9 @@ async function apiAs(phone, method, p, body) {
   await A.modalOk(); await sleep(500);
   ok(!st().seasons.includes("SS2099UI"), "通过界面删除季节");
 
-  // ---- 管理后台：数据导出挪到员工账号/新增员工附近；意见反馈已整个下线 ----
-  ok(app().indexOf("数据导出") < app().indexOf("职位管理") && app().indexOf("数据导出") < app().indexOf("季节管理"),
-    "数据导出已挪到员工账号/新增员工附近，排在职位管理/季节管理前面");
+  // ---- 管理后台：数据导出独立成一个分组（原来埋在长滚动底部）；意见反馈已整个下线 ----
+  A.setAdminTab("data"); await sleep(200);
+  ok(app().includes("数据导出"), "「数据」分组里是数据导出");
   ok(!!doc.getElementById("exp-season"), "数据导出带季节筛选下拉");
   await sleep(300);
   ok(!app().includes("意见反馈") && !app().includes("标记已处理"), "管理后台已移除意见反馈区块");

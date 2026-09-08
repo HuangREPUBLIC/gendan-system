@@ -489,7 +489,8 @@ router.delete("/seasons/:name", A.adminRequired, (req, res) => {
 /* =========================================================
  *  订单
  * ========================================================= */
-function canCreateOrder(u) { return !!u; }
+// 建单/导入权限现在是职位上可配置的开关（见 auth.js 的 permsOf），三个模板默认都开着，行为不变
+const canCreateOrder = (u) => A.canCreateOrder(u);
 
 router.get("/orders", (req, res) => res.json(visibleOrdersPublic(req.user)));
 router.get("/orders/:id", (req, res) => {
@@ -649,7 +650,8 @@ router.delete("/orders/:id/logs/:key/:entryId", (req, res) => {
 router.post("/orders/:id/subs", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
-  if (!A.canAddLog(req.user, o, "production")) return res.status(403).json({ error: "无权添加加工点" });
+  // 加工点是改生产明细的结构(不是打卡)，所以看编辑权限而不是打卡权限
+  if (!A.canEditSection(req.user, o, "production")) return res.status(403).json({ error: "无权添加加工点" });
   const name = String((req.body || {}).name || "").trim();
   if (!name) return res.status(400).json({ error: "请填写加工点名称" });
   o.data.subs = o.data.subs || [];
@@ -661,7 +663,7 @@ router.post("/orders/:id/subs", (req, res) => {
 router.patch("/orders/:id/subs/:subId", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
-  if (!A.canAddLog(req.user, o, "production")) return res.status(403).json({ error: "无权修改" });
+  if (!A.canEditSection(req.user, o, "production")) return res.status(403).json({ error: "无权修改" });
   const sub = (o.data.subs || []).find(x => x.id === req.params.subId);
   if (!sub) return res.status(404).json({ error: "加工点不存在" });
   const name = String((req.body || {}).name || "").trim();
@@ -808,6 +810,24 @@ router.delete("/roles/:k", A.adminRequired, (req, res) => {
   if (used) return res.status(400).json({ error: `还有 ${used} 位员工是「${r.label}」，请先把他们改成其它职位` });
   setSetting("roles", roles.filter(x => x.k !== r.k));
   res.json(roles.filter(x => x.k !== r.k));
+});
+
+// 配置某个职位能干什么（管理 → 权限）。传 perms:null 表示恢复成该模板的默认权限。
+// 管理员职位不在这里配置——它永远全权，能改的话容易把自己锁在门外。
+router.patch("/roles/:k/perms", A.adminRequired, (req, res) => {
+  const roles = getSetting("roles", []);
+  const r = roles.find(x => x.k === req.params.k);
+  if (!r) return res.status(404).json({ error: "职位不存在" });
+  const body = (req.body || {}).perms;
+  if (body === null) { delete r.perms; setSetting("roles", roles); return res.json(roles); }
+  if (!body || typeof body !== "object") return res.status(400).json({ error: "权限配置格式不对" });
+  // 只收认识的键，别的一律丢掉，避免前端传脏数据把权限撑大
+  const clean = {};
+  if (body.scope === "all" || body.scope === "own") clean.scope = body.scope;
+  A.PERM_KEYS.forEach(k => { if (typeof body[k] === "boolean") clean[k] = body[k]; });
+  r.perms = clean;
+  setSetting("roles", roles);
+  res.json(roles);
 });
 
 /* =========================================================

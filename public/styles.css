@@ -191,6 +191,31 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;
   border-radius:var(--radius-pill);background:var(--bad);color:#fff;font-size:var(--fs-micro);font-weight:600;line-height:1}
 
+/* ---------- 二级分组导航（管理页把七个板块归成四组） ----------
+   手机上横向滚动而不是换行，标签少的时候看起来就是一排普通分段控件 */
+.subnav{display:flex;gap:6px;overflow-x:auto;padding:2px 0 14px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.subnav::-webkit-scrollbar{display:none}
+.subnav button{
+  flex:0 0 auto;background:var(--card);border:0;cursor:pointer;color:var(--ink-2);
+  font-size:var(--fs-sm);font-weight:500;padding:9px 16px;min-height:40px;border-radius:var(--radius-pill);
+  box-shadow:var(--card-ring);
+  transition:background-color 140ms ease, color 140ms ease, transform 140ms var(--ease-out);
+}
+.subnav button:active{transform:scale(0.96)}
+.subnav button.on{background:var(--blue);color:var(--on-blue);box-shadow:none;font-weight:600}
+
+/* 标签墙：职位/季节/字段/工厂四处都是"一排可删的小标签"，原先各写一遍同样的内联样式 */
+.chip-wall{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* 权限开关行 */
+.perm-row{display:flex;align-items:center;gap:12px;padding:10px 16px;min-height:46px;
+  border-bottom:.5px solid var(--line)}
+.perm-row:last-child{border-bottom:0}
+.perm-row input[type=checkbox]{width:22px;height:22px;flex:none;margin:0;accent-color:var(--blue-2);cursor:pointer}
+.perm-main{flex:1;min-width:0}
+.perm-name{font-size:var(--fs-md)}
+.perm-sub{font-size:var(--fs-cap);color:var(--ink-2);margin-top:1px;line-height:1.4}
+
 /* ---------- 底部 Tab 栏（宽屏自动变顶部） ---------- */
 .tabbar{
   position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;
@@ -273,6 +298,8 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
    表格上面的搜索框和下面的分页条才对得上同一条左边线 */
 .tbl-wrap{overflow-x:auto}
 table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width:460px;font-variant-numeric:tabular-nums}
+/* 表格里的小号下拉（员工职位那一列），原先是写在 HTML 里的一串内联样式 */
+.tbl-select{width:auto;min-height:34px;padding:4px 30px 4px 10px;font-size:var(--fs-sm)}
 .tbl th{text-align:left;color:var(--ink-2);font-weight:400;font-size:var(--fs-sub);padding:9px 16px;border-bottom:.5px solid var(--line);white-space:nowrap}
 .tbl td{border-bottom:.5px solid var(--line);padding:12px 16px;vertical-align:middle}
 .tbl tr:last-child td{border-bottom:0}

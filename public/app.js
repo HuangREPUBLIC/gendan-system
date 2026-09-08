@@ -23,6 +23,7 @@ const expandedLogGroups = new Set();   // 打卡记录里手动点开"展开全�
 // ship/recent 由桌面端概览卡片点出来（手机端没有那些卡片，这两项始终保持默认值）
 let filt = { season: "", sales: "", follower: "", kw: "", factoryKw: "", ship: "", recent: false };
 let adminUserFilt = { kw: "", page: 1 };   // 管理后台「员工账号」表的搜索/分页
+let adminTab = "people";                   // 管理页当前分组：人员/权限/表单配置/数据
 const ADMIN_USERS_PAGE_SIZE = 10;
 let modalState = null;
 let deferredInstall = null;   // 安卓/桌面 Chrome 的原生安装事件
@@ -183,19 +184,56 @@ function isOwnByFollower(o) {
   return o.values.follower === u.id;
 }
 function shipLocked(o) { return !!(o && o.values && o.values.shipDate); }
-// 按板块判断编辑权限："一、订单明细"(order)只有业务员(自己的单)能改，
-// "二、生产明细"(production)只有下厂员(自己负责的单)能改；主管/管理员两块都不受限。
-// section 传 undefined 表示不分板块(验货问题/跟单小结这类)，只看是不是本单相关人员。
+/* 职位能力：跟服务端 auth.js 的 permsOf 一套规则，这里只负责隐藏按钮，真正的拦截在服务端。
+   template(身份)决定"自己的单"怎么算，perms(能力)决定能干什么——管理员在「管理 → 权限」里改。
+   职位没配过 perms 就按模板默认，跟以前行为一致。 */
+const TEMPLATE_PERMS = {
+  sales:      { scope: "own", editOrder: true,  editProd: false, logOrder: true,  logProd: false, createOrder: true, inspect: true },
+  follower:   { scope: "own", editOrder: false, editProd: true,  logOrder: false, logProd: true,  createOrder: true, inspect: true },
+  supervisor: { scope: "all", editOrder: true,  editProd: true,  logOrder: true,  logProd: true,  createOrder: true, inspect: true }
+};
+const PERM_KEYS = ["editOrder", "editProd", "logOrder", "logProd", "createOrder", "inspect"];
+const ALL_PERMS = { scope: "all", editOrder: true, editProd: true, logOrder: true, logProd: true, createOrder: true, inspect: true };
+function myPerms() {
+  const u = me(); if (!u) return null;
+  if (isAdmin()) return ALL_PERMS;
+  const base = TEMPLATE_PERMS[u.template] || TEMPLATE_PERMS.follower;
+  const saved = (state.roles.find(r => r.k === u.role) || {}).perms;
+  if (!saved) return base;
+  const out = Object.assign({}, base);
+  if (saved.scope === "all" || saved.scope === "own") out.scope = saved.scope;
+  PERM_KEYS.forEach(k => { if (typeof saved[k] === "boolean") out[k] = saved[k]; });
+  return out;
+}
+// 是不是"这单的相关人员"：scope=all 对所有单都算；scope=own 按 template 决定归属关系
+function isRelated(o) {
+  const u = me(); if (!u || !o) return false;
+  const p = myPerms();
+  if (p.scope === "all") return true;
+  if (u.template === "sales") return isOwnBySales(o);
+  if (u.template === "follower") return isOwnByFollower(o);
+  return false;
+}
 function canEditSection(o, section) {
   const u = me(); if (!u) return false;
   if (isAdmin()) return true;
-  if (isSupervisor()) return true;
-  if (u.template === "sales") return (section === undefined || section === "order") && isOwnBySales(o);
-  if (u.template === "follower") return (section === undefined || section === "production") && isOwnByFollower(o);
-  return false;
+  if (!isRelated(o)) return false;
+  const p = myPerms();
+  if (section === "order") return !!p.editOrder;
+  if (section === "production") return !!p.editProd;
+  return !!(p.editOrder || p.editProd);
 }
 function canEditBasic(o) { return canEditSection(o, "order") || canEditSection(o, "production"); }
-const canAddLog = canEditSection;
+// 打卡跟改字段是两个独立开关：可以只给打卡权、不给改字段权
+function canAddLog(o, section) {
+  const u = me(); if (!u) return false;
+  if (isAdmin()) return true;
+  if (!isRelated(o)) return false;
+  const p = myPerms();
+  if (section === "order") return !!p.logOrder;
+  if (section === "production") return !!p.logProd;
+  return !!(p.logOrder || p.logProd);
+}
 function canTouchEntry(o, e, section) {
   const u = me(); if (!u) return false;
   if (isAdmin()) return true;
@@ -211,8 +249,8 @@ function canEditShipDate(o) {
   if (shipLocked(o)) return false;
   return canEditBasic(o);
 }
-const canWriteInspProblem = (o) => canAddLog(o);
-const canWriteInspFix = (o) => canAddLog(o);
+const canWriteInspProblem = (o) => isAdmin() || (isRelated(o) && !!(myPerms() || {}).inspect);
+const canWriteInspFix = canWriteInspProblem;
 
 /* ================= 字段与下拉 ================= */
 function optionsFor(f) {
@@ -1156,11 +1194,30 @@ function vStaffLogs() {
 }
 
 /* ---------- 管理后台 ---------- */
-function vAdmin() {
-  if (!isAdmin()) return `<div class="card"><div class="empty">仅管理员可访问</div></div>`;
+// 权限开关的文案：给管理员看的话，不能是 editProd 这种内部名字
+const PERM_LABELS = [
+  ["editOrder",   "改「一、订单明细」",      "货号、款式、数量、交期、工厂这些字段"],
+  ["editProd",    "改「二、生产明细」",      "指定下厂员、加工点、发货日期"],
+  ["logOrder",    "在「一、订单明细」打卡",  "面料进度、绣印进度、产前样进度"],
+  ["logProd",     "在「二、生产明细」打卡",  "裁剪、整烫、包装、本厂和加工点"],
+  ["createOrder", "新建 / 导入订单",         ""],
+  ["inspect",     "验货问题与整改",          ""]
+];
+// 某个职位当前生效的权限：没配过就按模板默认（跟服务端 permsOf 同一套规则）
+function permsOfRole(r) {
+  const base = TEMPLATE_PERMS[r.template] || TEMPLATE_PERMS.follower;
+  if (!r.perms) return base;
+  const out = Object.assign({}, base);
+  if (r.perms.scope === "all" || r.perms.scope === "own") out.scope = r.perms.scope;
+  PERM_KEYS.forEach(k => { if (typeof r.perms[k] === "boolean") out[k] = r.perms[k]; });
+  return out;
+}
+const TEMPLATE_LABEL = { sales: "业务员", follower: "下厂员", supervisor: "主管" };
+
+function adminPeopleHtml() {
   const roleCell = u => u.role === "admin"
     ? `<span class="tag role">管理员</span>`
-    : `<select class="in" style="width:auto;min-height:34px;padding:4px 30px 4px 10px;font-size:14px" onchange="A.changeRole('${u.id}',this.value)">
+    : `<select class="in tbl-select" onchange="A.changeRole('${u.id}',this.value)">
         ${state.roles.map(r => `<option value="${esc(r.k)}" ${u.role === r.k ? "selected" : ""}>${esc(r.label)}</option>`).join("")}</select>`;
   const kw = adminUserFilt.kw.trim().toLowerCase();
   const allStaff = state.users.filter(u => u.role !== "admin");
@@ -1201,47 +1258,54 @@ function vAdmin() {
         state.roles.map(r => `<option value="${esc(r.k)}">${esc(r.label)}</option>`).join("")}</select></label>
       <label class="field"><span>初始密码</span><input class="in" id="nu-pass" value="123456"></label>
       <div class="btn-row"><button class="btn" onclick="A.addUser()">创建账号</button></div></div>
-  </section>
+  </section>`;
+}
 
-  <section class="group a-export">
-    <div class="group-title">数据导出</div>
+function adminPermsHtml() {
+  return `<section class="group a-roles">
+    <div class="group-title">职位</div>
     <div class="card"><div class="card-pad">
-      <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">导出订单全部内容（订单基本信息、生产进度、验货问题、跟单小结）为 Excel(.xlsx) 文件，照片以链接形式列出</p>
-      <label class="field" style="padding-left:0;padding-right:0;border:0"><span>按季节筛选（可选）</span>
-        <select class="in" id="exp-season"><option value="">全部季节</option>${
-          state.seasons.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></label>
-      <button class="btn" onclick="A.exportData()">导出订单数据</button></div></div>
-  </section>
-
-  <section class="group a-roles">
-    <div class="group-title">职位管理</div>
-    <div class="card"><div class="card-pad">
-      <div style="display:flex;gap:8px;flex-wrap:wrap">${state.roles.map(r => `<span class="tag role">${esc(r.label)}
-        · ${r.template === "sales" ? "业务员权限" : r.template === "supervisor" ? "主管权限" : "下厂员权限"}${r.core ? "" :
+      <div class="chip-wall">${state.roles.map(r => `<span class="tag role">${esc(r.label)}
+        · ${TEMPLATE_LABEL[r.template] || "下厂员"}权限${r.core ? "" :
           ` <a href="javascript:void(0)" onclick="A.delRole('${r.k}')" style="margin-left:4px">✕</a>`}</span>`).join("")}</div></div>
       <label class="field"><span>新职位名称</span><input class="in" id="nr-label" placeholder="例：跟单主管"></label>
       <label class="field"><span>权限模板</span><select class="in" id="nr-template">
-        <option value="sales">业务员权限（可建单、改自己录入的订单）</option>
-        <option value="follower">下厂员权限（只能给自己负责的订单打卡）</option>
-        <option value="supervisor">主管权限（能管理所有订单）</option></select></label>
+        <option value="sales">业务员权限（管自己创建/负责的订单）</option>
+        <option value="follower">下厂员权限（管自己被指派的订单）</option>
+        <option value="supervisor">主管权限（管所有订单）</option></select></label>
       <div class="btn-row"><button class="btn" onclick="A.addRole()">添加职位</button></div></div>
   </section>
 
-  <section class="group a-seasons">
-    <div class="group-title">季节管理</div>
-    <div class="card"><div class="card-pad">
-      <div style="display:flex;gap:8px;flex-wrap:wrap">${state.seasons.map(s => `<span class="tag role">${esc(s)}
-        <a href="javascript:void(0)" onclick="A.delSeason('${encodeURIComponent(s)}')" style="margin-left:4px">✕</a></span>`).join("")}</div></div>
-      <label class="field"><span>新季节名称</span><input class="in" id="ns-name" placeholder="例：SS2029"></label>
-      <div class="btn-row"><button class="btn" onclick="A.addSeason()">添加季节</button></div></div>
-  </section>
+  <section class="group a-perms">
+    <div class="group-title">权限配置</div>
+    ${state.roles.map(r => {
+      const p = permsOfRole(r);
+      return `<div class="card" style="margin-top:12px">
+        <div class="row-item" style="background:var(--bg)">
+          <div class="row-main"><div class="row-label">${esc(r.label)}</div>
+            <div class="row-sub">${TEMPLATE_LABEL[r.template] || "下厂员"}模板${r.perms ? " · 已自定义" : " · 默认权限"}</div></div>
+          ${r.perms ? `<button class="btn mini ghost" onclick="A.resetRolePerms('${r.k}')">恢复默认</button>` : ""}
+        </div>
+        <label class="field"><span>看订单范围</span>
+          <select class="in" onchange="A.setRolePerm('${r.k}','scope',this.value)">
+            <option value="own" ${p.scope === "own" ? "selected" : ""}>只看自己相关的订单</option>
+            <option value="all" ${p.scope === "all" ? "selected" : ""}>看全部订单</option></select></label>
+        ${PERM_LABELS.map(([k, name, sub]) => `<label class="perm-row">
+          <input type="checkbox" ${p[k] ? "checked" : ""} onchange="A.setRolePerm('${r.k}','${k}',this.checked)">
+          <span class="perm-main"><span class="perm-name">${name}</span>${
+            sub ? `<div class="perm-sub">${sub}</div>` : ""}</span></label>`).join("")}
+      </div>`;
+    }).join("")}
+  </section>`;
+}
 
-  <section class="group a-fields">
+function adminFormHtml() {
+  return `<section class="group a-fields">
     <div class="group-title">自定义字段</div>
     <div class="card cf-split">
       <div class="cf-lists">${["order", "production"].map(s => `<div class="card-pad" style="padding-bottom:6px">
         <div class="row-sub" style="margin-bottom:6px">${s === "order" ? "一、订单明细" : "二、生产明细"}</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">${state.fields[s].map(f => `<span class="tag role">${esc(f.label)}${
+        <div class="chip-wall">${state.fields[s].map(f => `<span class="tag role">${esc(f.label)}${
           f.core ? "" : ` <a href="javascript:void(0)" onclick="A.delField('${s}','${f.k}')" style="margin-left:4px">✕</a>`}</span>`).join("")}</div></div>`).join("")}</div>
       <div class="cf-form">
       <label class="field"><span>添加到板块</span><select class="in" id="cf-sec"><option value="order">一、订单明细</option><option value="production">二、生产明细</option></select></label>
@@ -1258,11 +1322,46 @@ function vAdmin() {
     <div class="card">${[["fabric", "面料工厂"], ["emb", "绣花/印花工厂"], ["prod", "服装工厂"]].map(([k, t]) => `
       <div class="card-pad" style="padding-bottom:10px">
         <div class="row-sub" style="margin-bottom:6px">${t}</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${state.factories[k].map(x =>
+        <div class="chip-wall">${state.factories[k].map(x =>
           `<span class="tag role">${esc(x)} <a href="javascript:void(0)" onclick="A.delFactory('${k}','${encodeURIComponent(x)}')" style="margin-left:4px">✕</a></span>`).join("")}</div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <input class="in" id="fac-${k}" placeholder="新工厂名"><button class="btn mini ghost" onclick="A.addFactory('${k}')">添加</button></div></div>`).join("")}</div>
+  </section>
+
+  <section class="group a-seasons">
+    <div class="group-title">季节</div>
+    <div class="card"><div class="card-pad">
+      <div class="chip-wall">${state.seasons.map(s => `<span class="tag role">${esc(s)}
+        <a href="javascript:void(0)" onclick="A.delSeason('${encodeURIComponent(s)}')" style="margin-left:4px">✕</a></span>`).join("")}</div></div>
+      <label class="field"><span>新季节名称</span><input class="in" id="ns-name" placeholder="例：SS2029"></label>
+      <div class="btn-row"><button class="btn" onclick="A.addSeason()">添加季节</button></div></div>
   </section>`;
+}
+
+function adminDataHtml() {
+  return `<section class="group a-export">
+    <div class="group-title">数据导出</div>
+    <div class="card"><div class="card-pad">
+      <p class="row-sub" style="margin:0 0 12px">导出订单全部内容（订单基本信息、生产进度、验货问题、跟单小结）为 Excel(.xlsx) 文件，照片以链接形式列出</p>
+      <label class="field" style="padding-left:0;padding-right:0;border:0"><span>按季节筛选（可选）</span>
+        <select class="in" id="exp-season"><option value="">全部季节</option>${
+          state.seasons.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></label>
+      <button class="btn" onclick="A.exportData()">导出订单数据</button></div></div>
+  </section>`;
+}
+
+// 管理页原来是七个板块平铺一条长滚动，人员/权限/表单配置/数据导出全混在一起。
+// 归成四组，一次只看一组，找东西不用再从头翻到尾。
+const ADMIN_TABS = [["people", "人员"], ["perms", "权限"], ["form", "表单配置"], ["data", "数据"]];
+function vAdmin() {
+  if (!isAdmin()) return `<div class="card"><div class="empty">仅管理员可访问</div></div>`;
+  const body = adminTab === "perms" ? adminPermsHtml()
+    : adminTab === "form" ? adminFormHtml()
+    : adminTab === "data" ? adminDataHtml()
+    : adminPeopleHtml();
+  return `<nav class="subnav">${ADMIN_TABS.map(([k, label]) =>
+    `<button class="${adminTab === k ? "on" : ""}" onclick="A.setAdminTab('${k}')">${label}</button>`).join("")}</nav>
+  ${body}`;
 }
 
 /* ---------- 消息通知 ---------- */
@@ -1453,6 +1552,22 @@ const A = {
   async testPush() {
     try { await api("POST", "/push/test"); toast("已发送，稍等一下看手机通知栏"); }
     catch (e) { toast((e && e.error) || "发送失败"); }
+  },
+
+  setAdminTab(t) { adminTab = t; render(); window.scrollTo(0, 0); },
+  // 权限开关是即改即生效的：改完立刻落库，不留"未保存"这种中间状态让人记挂
+  async setRolePerm(roleKey, key, value) {
+    const r = state.roles.find(x => x.k === roleKey); if (!r) return;
+    const perms = Object.assign({}, permsOfRole(r), r.perms || {});
+    perms[key] = value;
+    await run(() => api("PATCH", `/roles/${roleKey}/perms`, { perms }), "已保存");
+  },
+  async resetRolePerms(roleKey) {
+    modal({
+      title: "恢复默认权限", body: "这个职位的权限将恢复成所属模板的默认配置。",
+      okText: "恢复", danger: true,
+      onOk: () => run(() => api("PATCH", `/roles/${roleKey}/perms`, { perms: null }), "已恢复默认")
+    });
   },
 
   async install() {

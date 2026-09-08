@@ -304,6 +304,31 @@ async function call(method, path, token, body) {
   ok(await unreadOf(wT) === 0, "全部已读后未读数归零");
   ok((await call("GET", "/notifications", null)).status === 401, "未登录不能读通知列表");
 
+  // ---- 职位权限可配置：管理员在后台逐项开关，不用改代码 ----
+  // 业务员默认不能在「二、生产明细」打卡
+  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "packing", text: "改开关前" })).status === 403,
+    "默认状态下业务员不能在生产明细打卡");
+  ok((await call("PATCH", "/roles/sales/perms", sT, { perms: { logProd: true } })).status === 403,
+    "非管理员不能改职位权限");
+  ok((await call("PATCH", "/roles/sales/perms", aT, { perms: { logProd: true } })).status === 200,
+    "管理员打开业务员的「生产明细打卡」开关");
+  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "packing", text: "改开关后" })).status === 200,
+    "开关一打开，业务员立刻能在生产明细打卡（不用改代码）");
+  // 关键边界：放开的只是打卡权，改生产明细结构的权限不能跟着漏出去
+  ok((await call("POST", `/orders/${o1.id}/subs`, sT, { name: "只有打卡权也想加加工点" })).status === 403,
+    "只给打卡权不会连带放出「加工点管理」这类结构性编辑");
+  ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { factoryNote: "x" } })).status !== 500,
+    "改开关不会让订单编辑接口出错");
+  // 恢复默认后行为回到原样
+  ok((await call("PATCH", "/roles/sales/perms", aT, { perms: null })).status === 200, "恢复成模板默认权限");
+  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "packing", text: "恢复后" })).status === 403,
+    "恢复默认后业务员又不能在生产明细打卡了");
+  // 脏数据不能把权限撑大
+  await call("PATCH", "/roles/sales/perms", aT, { perms: { logProd: "yes", 乱来: true, scope: "everything" } });
+  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "packing", text: "脏数据" })).status === 403,
+    "非法的权限值被忽略，不会意外放开权限");
+  await call("PATCH", "/roles/sales/perms", aT, { perms: null });
+
   // ---- 系统推送订阅（App 没打开时也能收到手机通知） ----
   ok((await call("GET", "/push/key")).status === 401, "未登录拿不到推送公钥");
   const vapid = await call("GET", "/push/key", aT);
