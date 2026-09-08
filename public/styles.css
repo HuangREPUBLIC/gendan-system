@@ -679,6 +679,9 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   .page[data-view="admin"]{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));
     column-gap:24px;align-items:start}
   .page[data-view="admin"] > .group{grid-column:span 6}
+  /* 分组导航必须横跨整行：不写这条它会被当成一个普通栅格块，压成一列宽，
+     结果只露得出第一个分组按钮，其余三个被挤到看不见的地方 */
+  .page[data-view="admin"] > .subnav{grid-column:1 / -1}
   .page[data-view="admin"] > .a-users{grid-column:span 7}
   .page[data-view="admin"] > .a-newuser{grid-column:span 5}
 
@@ -693,11 +696,13 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 
 /* ≥1280px 才够宽：管理后台把三块轻量内容并成一行，自定义字段再拆成"字段列表 | 添加表单" */
 @media(min-width:1280px){
-  .page[data-view="admin"] > .a-export,
-  .page[data-view="admin"] > .a-roles,
-  .page[data-view="admin"] > .a-seasons{grid-column:span 4}
-  .page[data-view="admin"] > .a-fields{grid-column:span 7}
-  .page[data-view="admin"] > .a-factories{grid-column:span 5}
+  /* 「权限」分组：职位在左，权限开关在右 */
+  .page[data-view="admin"] > .a-roles{grid-column:span 5}
+  .page[data-view="admin"] > .a-perms{grid-column:span 7}
+  /* 「表单配置」分组：自定义字段自己占满一行(它内部还要再左右分栏)，工厂和季节共用第二行 */
+  .page[data-view="admin"] > .a-fields{grid-column:1 / -1}
+  .page[data-view="admin"] > .a-factories{grid-column:span 7}
+  .page[data-view="admin"] > .a-seasons{grid-column:span 5}
   .cf-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .cf-split .cf-lists{border-right:.5px solid var(--line)}
   .cf-split .cf-form{min-width:0}
