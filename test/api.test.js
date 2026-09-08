@@ -39,6 +39,21 @@ async function call(method, path, token, body) {
   ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "fabricProg", text: "业务员更新面料" })).status === 200, "业务员更新订单明细(一)进度");
   ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "ironing", text: "业务员想打卡生产明细" })).status === 403, "业务员不能在生产明细(二)打卡");
   ok((await call("POST", `/orders/${o1.id}/logs`, wT, { key: "fabricProg", text: "下厂员想打卡订单明细" })).status === 403, "本单负责下厂员不能在订单明细(一)打卡");
+  // 产前样是业务员跟客户确认的环节，归业务员管：字段从「二、生产明细」挪到「一、订单明细」的
+  // 绣印进度后面，业务员由此天然拿到打卡权，能及时更新确认结果
+  const fieldsNow = (await call("GET", "/bootstrap", aT)).j.fields;
+  ok(fieldsNow.order.some(f => f.k === "preSample") && !fieldsNow.production.some(f => f.k === "preSample"),
+    "产前样进度已归入「一、订单明细」");
+  ok(fieldsNow.order.findIndex(f => f.k === "preSample") === fieldsNow.order.findIndex(f => f.k === "embProg") + 1,
+    "产前样进度紧跟在绣印进度后面");
+  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "preSample", text: "业务员更新产前样" })).status === 200,
+    "本单业务员能在产前样进度打卡");
+  ok((await call("POST", `/orders/${o1.id}/logs`, wT, { key: "preSample", text: "下厂员想打卡产前样" })).status === 403,
+    "产前样归业务员管，下厂员不能在这里打卡");
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "preSample", text: "无关的人想打卡" })).status === 403,
+    "跟本单无关的人不能在产前样进度打卡");
+  // 历史记录不会因为字段换板块而丢失（演示数据里本来就有产前样打卡记录）
+  ok((await call("GET", `/orders/${o1.id}`, sT)).j.logs.preSample.length >= 1, "产前样的历史打卡记录仍在");
   // sales edit "一、订单明细"(含指定下厂员) ok，改"二、生产明细"其它内容不行；下厂员反过来，
   // 但下厂员不能自己改派"下厂员"这个字段(那算业务员管的事)；跟本单无关的下厂员两边都不行
   ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { desc: "改过的款式描述" } })).status === 200, "业务员改自己订单「一、订单明细」");

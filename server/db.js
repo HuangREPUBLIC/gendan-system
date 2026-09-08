@@ -133,6 +133,20 @@ function ensureDefaults() {
     setSetting("seasons", merged);
     console.log("[db] 已为现有数据库补齐季节配置");
   }
+  // 老库迁移：产前样进度从「二、生产明细」挪到「一、订单明细」的绣印进度后面。
+  // 产前样是业务员跟客户确认的环节，挂在生产明细下业务员打不了卡，更新不及时。
+  // 只挪位置不动字段本身；打卡记录按 key 存在 orders.data.logs.preSample 里，历史记录不受影响。
+  const preF = getSetting("fields", null);
+  if (preF && (preF.production || []).some(f => f.k === "preSample")) {
+    const moved = preF.production.find(f => f.k === "preSample");
+    preF.production = preF.production.filter(f => f.k !== "preSample");
+    if (!(preF.order || []).some(f => f.k === "preSample")) {
+      const at = preF.order.findIndex(f => f.k === "embProg");
+      preF.order.splice(at >= 0 ? at + 1 : preF.order.length, 0, moved);
+    }
+    setSetting("fields", preF);
+    console.log("[db] 产前样进度已移到「一、订单明细」，业务员可直接打卡");
+  }
   // 老库把「面料」文本字段换成「面料工厂」下拉（插在绣印工厂前面），不影响其它自定义字段
   const fields = getSetting("fields", null);
   if (fields && fields.order) {
@@ -326,6 +340,9 @@ function seedIfEmpty() {
       { k: "deadline", label: "订单交期", type: "date" },
       { k: "fabricProg", label: "面料进度", type: "log" },
       { k: "embProg", label: "绣印进度", type: "log" },
+      // 产前样进度归「一、订单明细」：产前样是业务员跟客户确认的环节，归业务员管，
+      // 跟面料进度/绣印进度排在一起，业务员能随时打卡更新
+      { k: "preSample", label: "产前样进度", type: "log" },
       { k: "factory", label: "服装工厂", type: "factory-prod" },
       { k: "fabricFactory1", label: "面料工厂1", type: "factory-fabric" },
       { k: "fabricFactory2", label: "面料工厂2", type: "factory-fabric" },
@@ -334,7 +351,6 @@ function seedIfEmpty() {
     ],
     production: [
       { k: "follower", label: "下厂员", type: "user-follower", core: true },
-      { k: "preSample", label: "产前样进度", type: "log" },
       { k: "cutting", label: "裁剪进度", type: "log" },
       { k: "ironing", label: "整烫进度", type: "log" },
       { k: "packing", label: "包装进度", type: "log" },

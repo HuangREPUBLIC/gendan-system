@@ -979,7 +979,7 @@ function vDetail() {
       ? `${editForm("production")}<div class="btn-row"><button class="btn" onclick="A.saveBasic('${o.id}')">保存修改</button></div>`
       : kv(topProdScalars, false)}</div>
     <div class="card" style="margin-top:14px">
-      ${logsOf("production").filter(f => ["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
+      ${logsOf("production").filter(f => f.k === "cutting").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
       <div class="prodgroup-title"><span><span class="lf-dot"></span>生产进度</span></div>
       <div class="logfield" style="padding-top:0">
         <div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
@@ -992,7 +992,7 @@ function vDetail() {
         ${canProdLog ? `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
           <button class="btn mini ghost" onclick="A.addSubPrompt('${o.id}')">＋ 添加加工点</button></div>` : ""}
       </div>
-      ${logsOf("production").filter(f => !["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
+      ${logsOf("production").filter(f => f.k !== "cutting").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
     </div>
     ${dateFieldsProd.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsProd, canEditShipDate(o))}</div>` : ""}
   </section>
