@@ -304,6 +304,34 @@ async function call(method, path, token, body) {
   ok(await unreadOf(wT) === 0, "全部已读后未读数归零");
   ok((await call("GET", "/notifications", null)).status === 401, "未登录不能读通知列表");
 
+  // ---- 系统推送订阅（App 没打开时也能收到手机通知） ----
+  ok((await call("GET", "/push/key")).status === 401, "未登录拿不到推送公钥");
+  const vapid = await call("GET", "/push/key", aT);
+  ok(vapid.status === 200 && typeof vapid.j.publicKey === "string" && vapid.j.publicKey.length > 20, "能拿到 VAPID 公钥");
+  // 订阅信息缺 keys 属于脏数据，要拒绝，不能存进去等推送时才炸
+  ok((await call("POST", "/push/subscribe", wT, { subscription: { endpoint: "https://x/1" } })).status === 400,
+    "订阅信息不完整时拒绝");
+  const fakeSub = (ep) => ({ endpoint: ep, keys: { p256dh: "BN" + "x".repeat(85), auth: "y".repeat(22) } });
+  const sub1 = await call("POST", "/push/subscribe", wT, { subscription: fakeSub("https://push.example/aaa") });
+  ok(sub1.status === 200 && sub1.j.devices === 1, "开启通知后记下这台设备");
+  // 同一台设备重复订阅(关了又开)只该覆盖，不该攒出两条
+  const sub1again = await call("POST", "/push/subscribe", wT, { subscription: fakeSub("https://push.example/aaa") });
+  ok(sub1again.j.devices === 1, "同一台设备重复订阅不会产生重复记录");
+  const sub2 = await call("POST", "/push/subscribe", wT, { subscription: fakeSub("https://push.example/bbb") });
+  ok(sub2.j.devices === 2, "同一个人第二台设备单独记一条");
+  // 订阅是私人的：别人不能拿 endpoint 把你的设备退订掉
+  ok((await call("POST", "/push/unsubscribe", sT, { endpoint: "https://push.example/aaa" })).status === 403,
+    "不能退订别人的设备");
+  const off = await call("POST", "/push/unsubscribe", wT, { endpoint: "https://push.example/aaa" });
+  ok(off.status === 200 && off.j.devices === 1, "关闭通知后这台设备被移除");
+  // 没开过通知的人点测试，应该明确告诉他没开，而不是假装成功
+  ok((await call("POST", "/push/test", sT)).status === 400, "没开启通知的人发测试通知会被挡下");
+  ok((await call("POST", "/push/test", wT)).status === 200, "开了通知的人能发测试通知");
+  // 推送服务返回 410(订阅失效)时要自动清理——上面那个假 endpoint 根本发不出去，
+  // 连续失败达到上限后这条订阅会被自己清掉，不会永远躺在库里每次都白发一遍
+  await call("POST", "/push/test", wT); await call("POST", "/push/test", wT);
+  ok((await call("POST", "/push/test", wT)).status === 400, "发不出去的订阅会被自动清理掉");
+
   // ---- 意见反馈功能已整个下线：相关接口一律不存在(404)，不能有任何残留入口 ----
   ok((await call("POST", "/feedback", aT, { text: "还能提交吗" })).status === 404, "提交反馈接口已下线");
   ok((await call("GET", "/feedback", aT)).status === 404, "查看反馈列表接口已下线");

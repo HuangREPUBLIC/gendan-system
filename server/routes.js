@@ -13,6 +13,7 @@ const XLSX = require("xlsx");
 const AdmZip = require("adm-zip");
 const { db, uid, getSetting, setSetting, UPLOAD_DIR } = require("./db");
 const A = require("./auth");
+const P = require("./push");
 
 const router = express.Router();
 
@@ -311,6 +312,9 @@ function notifyOrder(actor, o, what) {
     const now = Date.now();
     const stmt = db.prepare("INSERT INTO notifications(id,user_id,order_id,text,created_at,read_at,actor_name,order_label,what) VALUES(?,?,?,?,?,NULL,?,?,?)");
     ids.forEach(uid2 => stmt.run(uid(), uid2, o.id, text, now, actor.name, label, what));
+    // 同一批人再发一次系统推送，App 没打开也能看到。标题放订单号，一眼知道是哪张单；
+    // tag 用订单 id，同一张单连续改动只覆盖不堆叠，免得刷屏
+    P.sendToUsers([...ids], { title: label, body: `${actor.name} ${what}`, url: `/?order=${o.id}`, tag: `order-${o.id}` });
   } catch (e) { console.error("[notify] 生成通知失败", e); }
 }
 
@@ -873,6 +877,12 @@ router.post("/chat/with/:userId", (req, res) => {
   if (text.length > 2000) return res.status(400).json({ error: "消息太长了" });
   db.prepare("INSERT INTO messages(id,from_user,to_user,text,attachment,created_at,read_at) VALUES(?,?,?,?,?,?,NULL)")
     .run(uid(), meId, otherId, text, att ? JSON.stringify(att) : null, Date.now());
+  // 推给收信人。tag 用发信人 id，同一个人连发几条只保留最新一条通知，不会刷一屏
+  P.sendToUsers([otherId], {
+    title: req.user.name,
+    body: text ? text.slice(0, 60) : "[图片]",
+    url: `/?chat=${meId}`, tag: `chat-${meId}`
+  });
   res.json({ ok: true });
 });
 
@@ -908,6 +918,36 @@ router.post("/notifications/:id/read", (req, res) => {
   if (!row) return res.status(404).json({ error: "通知不存在" });
   if (row.user_id !== req.user.id) return res.status(403).json({ error: "无权操作这条通知" });
   if (!row.read_at) db.prepare("UPDATE notifications SET read_at = ? WHERE id = ?").run(Date.now(), row.id);
+  res.json({ ok: true });
+});
+
+/* =========================================================
+ *  系统推送订阅：App 没打开时也能收到手机通知（详见 push.js）
+ * ========================================================= */
+// 公钥给前端订阅用。这个是公开的，不敏感（私钥只在服务端）
+router.get("/push/key", (req, res) => res.json({ publicKey: P.publicKey() }));
+
+// 开启通知：前端拿到浏览器给的订阅信息后上报
+router.post("/push/subscribe", (req, res) => {
+  const ok = P.saveSubscription(req.user.id, (req.body || {}).subscription, req.headers["user-agent"]);
+  if (!ok) return res.status(400).json({ error: "订阅信息不完整" });
+  res.json({ ok: true, devices: P.countOf(req.user.id) });
+});
+
+// 关闭通知：只删自己的订阅。endpoint 本身就是随机不可猜的，再加一道 user_id 校验防手误删别人的
+router.post("/push/unsubscribe", (req, res) => {
+  const endpoint = String((req.body || {}).endpoint || "");
+  const row = db.prepare("SELECT user_id FROM push_subscriptions WHERE endpoint = ?").get(endpoint);
+  if (row && row.user_id !== req.user.id) return res.status(403).json({ error: "无权操作这个订阅" });
+  P.removeSubscription(endpoint);
+  res.json({ ok: true, devices: P.countOf(req.user.id) });
+});
+
+// 发一条测试通知给自己。安卓机型/浏览器差异大，员工开完通知能自己点一下验证收不收得到
+router.post("/push/test", async (req, res) => {
+  if (!P.countOf(req.user.id)) return res.status(400).json({ error: "这台设备还没开启通知" });
+  await P.sendToUsers([req.user.id],
+    { title: "跟单系统", body: "测试通知：能看到这条就说明通知正常了", url: "/", tag: "test" });
   res.json({ ok: true });
 });
 

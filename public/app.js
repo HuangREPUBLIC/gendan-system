@@ -32,6 +32,30 @@ const isMobileDevice = () => /iPhone|iPad|iPod|Android|Mobile|HarmonyOS/i.test(n
   || (navigator.maxTouchPoints > 1 && window.matchMedia && window.matchMedia("(pointer:coarse)").matches);
 const isStandalone = () => (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)
   || window.navigator.standalone === true;
+const isIOSDevice = () => /iPhone|iPad|iPod/i.test(navigator.userAgent || "")
+  || (/Mac/i.test(navigator.userAgent || "") && navigator.maxTouchPoints > 1);
+// 系统推送（App 没打开也能弹通知）的当前状态，进"我的"页时刷新
+// supported=false 的典型情况：微信内置浏览器、iOS 上还没"添加到主屏幕"
+let pushState = { supported: false, permission: "default", on: false, devices: 0, checked: false };
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+// 浏览器要的是 Uint8Array 格式的公钥，服务端给的是 base64url 字符串，这里转一下
+function urlB64ToUint8Array(base64) {
+  const pad = "=".repeat((4 - base64.length % 4) % 4);
+  const raw = atob((base64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+async function refreshPushState(rerender) {
+  pushState.checked = true;
+  pushState.supported = pushSupported();
+  if (!pushState.supported) { if (rerender) render(); return; }
+  pushState.permission = Notification.permission;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    pushState.on = !!sub && Notification.permission === "granted";
+  } catch (e) { pushState.on = false; }
+  if (rerender) render();
+}
 
 /* ================= 工具 ================= */
 const $ = id => document.getElementById(id);
@@ -515,7 +539,7 @@ function go(v, id) {
   photoDraft = {}; lightbox = null; state.notifs.open = false;
   if (v !== "chat") { state.chat.activeId = null; state.chat.messages = []; state.chat.draft = ""; state.chat.att = null; }
   render(); window.scrollTo(0, 0);
-  if (v === "account") A.loadMyLogs(state.me.id);
+  if (v === "account") { A.loadMyLogs(state.me.id); refreshPushState(true); }
   if (v === "staffLogs" && id) A.loadMyLogs(id);
   if (v === "chat") { A.loadContacts(); A.refreshUnread(); }
   if (v === "notifs") A.loadNotifs();
@@ -1281,11 +1305,48 @@ function vAccount() {
     <div class="card">${logListHtml(state.myLogs)}</div>
   </section>
 
+  ${pushSectionHtml()}
+
   <section class="group">
     <div class="btn-row" style="padding-left:0;padding-right:0">
       ${(isStandalone() || !isMobileDevice()) ? "" : `<button class="btn ghost block" style="margin-bottom:10px" onclick="A.install()">📲 安装到手机</button>`}
       <button class="btn danger ghost block" onclick="A.logout()">退出登录</button></div>
   </section>`;
+}
+
+// 「消息通知」开关：分四种情况给不同的话术，别让员工看着一个不能用的开关猜为什么
+function pushSectionHtml() {
+  const iosNeedsInstall = isIOSDevice() && !isStandalone();
+  let body;
+  if (iosNeedsInstall) {
+    // iOS 的硬限制：只有"添加到主屏幕"后的图标打开才收得到，Safari 标签页里申请权限都申请不了
+    body = `<div class="row-item"><div class="row-main">
+        <div class="row-label">需要先安装到手机</div>
+        <div class="row-sub">iPhone 上只有从主屏幕图标打开，才能收到系统通知</div></div></div>
+      <div class="btn-row"><button class="btn ghost block" onclick="A.install()">📲 安装到手机</button></div>`;
+  } else if (!pushState.supported) {
+    body = `<div class="row-item"><div class="row-main">
+        <div class="row-label">当前浏览器不支持系统通知</div>
+        <div class="row-sub">微信里打开的收不到通知，请用系统浏览器打开，或先安装到手机</div></div></div>`;
+  } else if (pushState.permission === "denied") {
+    body = `<div class="row-item"><div class="row-main">
+        <div class="row-label">通知权限已被拒绝</div>
+        <div class="row-sub">要到手机的「设置 → 通知」里，把本应用的通知重新打开</div></div></div>`;
+  } else if (pushState.on) {
+    body = `<div class="row-item"><div class="row-main">
+        <div class="row-label">已开启</div>
+        <div class="row-sub">订单更新、同事发消息，App 没打开也会提醒你</div></div>
+        <span class="tag ok">开启中</span></div>
+      <div class="btn-row"><button class="btn ghost" onclick="A.testPush()">发送测试通知</button>
+        <button class="btn danger ghost" onclick="A.disablePush()">关闭通知</button></div>`;
+  } else {
+    body = `<div class="row-item"><div class="row-main">
+        <div class="row-label">未开启</div>
+        <div class="row-sub">开启后，订单更新和同事消息会像普通 App 一样提醒你</div></div></div>
+      <div class="btn-row"><button class="btn block" onclick="A.enablePush()">开启消息通知</button></div>`;
+  }
+  return `<section class="group"><div class="group-title">消息通知</div>
+    <div class="card">${body}</div></section>`;
 }
 
 /* ================= 动作 ================= */
@@ -1357,6 +1418,43 @@ const A = {
     if (!showWelcome) return;
     showWelcome = false; render();
   },
+  /* ---- 系统推送 ---- */
+  async enablePush() {
+    try {
+      const perm = await Notification.requestPermission();
+      pushState.permission = perm;
+      if (perm !== "granted") { render(); return toast(perm === "denied" ? "已拒绝通知权限" : "没有开启通知"); }
+      const reg = await navigator.serviceWorker.ready;
+      const { publicKey } = await api("GET", "/push/key");
+      // 已有订阅就直接复用（换了密钥的情况极少，真出现了浏览器会报错，下面 catch 里兜住）
+      const sub = (await reg.pushManager.getSubscription())
+        || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(publicKey) });
+      const r = await api("POST", "/push/subscribe", { subscription: sub.toJSON() });
+      pushState.on = true; pushState.devices = r.devices || 1;
+      render();
+      toast("已开启，可以点「发送测试通知」验证一下");
+    } catch (e) {
+      console.error(e);
+      toast((e && e.error) || "开启失败，请换个浏览器或稍后再试");
+    }
+  },
+  async disablePush() {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await api("POST", "/push/unsubscribe", { endpoint: sub.endpoint }).catch(() => {});
+        await sub.unsubscribe().catch(() => {});
+      }
+      pushState.on = false; render();
+      toast("已关闭通知");
+    } catch (e) { toast("关闭失败"); }
+  },
+  async testPush() {
+    try { await api("POST", "/push/test"); toast("已发送，稍等一下看手机通知栏"); }
+    catch (e) { toast((e && e.error) || "发送失败"); }
+  },
+
   async install() {
     if (isStandalone()) return toast("已经是从主屏打开的了");
     if (deferredInstall) {                      // 安卓 / 桌面 Chrome：直接弹系统安装框
@@ -2073,6 +2171,19 @@ window.addEventListener("beforeinstallprompt", (e) => {
 });
 window.addEventListener("appinstalled", () => { deferredInstall = null; toast("已添加到手机主屏"); });
 
+// 点系统通知进来时 URL 上带着 ?order=xxx / ?chat=xxx，直接跳到对应页面。
+// 处理完把参数从地址栏抹掉，免得之后刷新又莫名其妙跳一次。
+function openFromPush() {
+  try {
+    const q = new URLSearchParams(location.search);
+    const order = q.get("order"), chat = q.get("chat");
+    if (!order && !chat) return;
+    history.replaceState(null, "", location.pathname);
+    if (order) go("detail", order);
+    else if (chat) { go("chat"); A.openChat(chat); }
+  } catch (e) {}
+}
+
 (async function boot() {
   // 每次打开App、只要本来是登录状态，都要过一遍欢迎界面（logo/公司名称/跟单系统）。
   // index.html 里已经有一份静态的欢迎界面兜底，JS 跑起来之前手机屏幕就不会是空的；
@@ -2086,7 +2197,7 @@ window.addEventListener("appinstalled", () => { deferredInstall = null; toast("�
   }
   render();
   if (showWelcome) A.dismissWelcome();
-  if (state.me) { A.refreshUnread(); A.refreshNotifUnread(); A.loadContacts(true); }
+  if (state.me) { A.refreshUnread(); A.refreshNotifUnread(); A.loadContacts(true); openFromPush(); }
   setInterval(() => { if (state.me) { A.refreshUnread(); A.refreshNotifUnread(); } }, 10000);
   setInterval(() => {
     if (!state.me) return;

@@ -64,6 +64,20 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_notif_unread ON notifications(user_id, read_at);
+  -- 系统推送订阅：一台设备(浏览器)一行。endpoint 是推送服务给的地址，天然唯一，
+  -- 用它做主键约束，同一台设备重复开关通知只会覆盖不会攒出重复行。
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    ua TEXT,
+    created_at INTEGER NOT NULL,
+    last_ok_at INTEGER,
+    fail_count INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions(user_id);
 `);
 
 const uid = () => crypto.randomBytes(9).toString("base64url");
