@@ -111,20 +111,13 @@ const COMPANY_NAME = "天津锦利国际贸易有限公司";
 const APP_NAME = "跟单系统";
 const APP_LOGO = `
   <svg viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-    <defs>
-      <linearGradient id="lg-bg" x1="60" y1="30" x2="440" y2="490" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#4C97DC"/><stop offset=".55" stop-color="#1E63AE"/><stop offset="1" stop-color="#10386C"/>
-      </linearGradient>
-      <linearGradient id="lg-gloss" x1="90" y1="60" x2="300" y2="300" gradientUnits="userSpaceOnUse">
-        <stop stop-color="#FFFFFF" stop-opacity=".26"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-    <rect width="512" height="512" rx="116" fill="url(#lg-bg)"/>
-    <path d="M116 0h280a116 116 0 0 1 116 116v70C420 96 300 40 176 40 152 40 128 42 106 46A116 116 0 0 1 116 0Z" fill="url(#lg-gloss)"/>
-    <path d="M108 274 L206 372 L344 150" stroke="#FFFFFF" stroke-width="42" stroke-linecap="round"
-          stroke-linejoin="round" stroke-dasharray="66 46" opacity=".97"/>
-    <path d="M336 164 L424 76" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round"/>
-    <ellipse cx="434" cy="66" rx="27" ry="17" transform="rotate(-45 434 66)" fill="none" stroke="#FFFFFF" stroke-width="15"/>
+    <rect width="512" height="512" rx="116" fill="#2F5FA8"/>
+    <rect x="128" y="87" width="256" height="338" rx="42" fill="#FFFFFF"/>
+    <path d="M200 174 V338" stroke="#2F5FA8" stroke-width="16"/>
+    <circle cx="200" cy="174" r="26" fill="#2F5FA8"/>
+    <circle cx="200" cy="256" r="26" fill="#2F5FA8"/>
+    <circle cx="200" cy="338" r="22" fill="#FFFFFF" stroke="#2F5FA8" stroke-width="15"/>
+    <path d="M262 174 H334 M262 256 H334 M262 338 H296" stroke="#2F5FA8" stroke-width="26" stroke-linecap="round"/>
   </svg>`;
 
 /* ================= API ================= */
