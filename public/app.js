@@ -1335,7 +1335,7 @@ function adminDataHtml() {
   return `<section class="group a-export">
     <div class="group-title">数据导出</div>
     <div class="card"><div class="card-pad">
-      <p class="row-sub" style="margin:0 0 12px">导出订单全部内容（订单基本信息、生产进度、验货问题、跟单小结）为 Excel(.xlsx) 文件，照片以链接形式列出</p>
+      <p class="row-sub" style="margin:0 0 12px">导出订单全部内容（订单基本信息、生产进度、验货问题、跟单小结）为 Excel(.xlsx) 文件，照片直接嵌在表格里</p>
       <label class="field" style="padding-left:0;padding-right:0;border:0"><span>按季节筛选（可选）</span>
         <select class="in" id="exp-season"><option value="">全部季节</option>${
           state.seasons.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></label>
@@ -2004,6 +2004,10 @@ const A = {
 
   async exportData() {
     if (!isAdmin()) return toast("仅管理员可导出");
+    // 照片多的时候要等一会儿，期间再点不会重复发请求（以前连点几次会叠着导出好几份）
+    if (A.exportData.busy) return toast("正在导出，请稍候…", true);
+    A.exportData.busy = true;
+    toast("正在导出，照片多时需要等一会儿…", true);
     try {
       const season = ($("exp-season") || {}).value || "";
       const qs = season ? "?season=" + encodeURIComponent(season) : "";
@@ -2015,6 +2019,7 @@ const A = {
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       toast("已开始下载");
     } catch (e) { toast((e && e.error) || "导出失败"); }
+    finally { A.exportData.busy = false; }
   },
 
   /* ---- 批量导入 ---- */
