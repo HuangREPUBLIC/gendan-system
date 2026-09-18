@@ -1,41 +1,29 @@
-/* ==========================================================================
-   跟单系统 — 界面样式
-   设计取向：iOS 的克制与秩序（分组列表、系统字体、大圆角、44px 触摸目标），
-   主色沿用韩式蓝。移动端底部 Tab 栏（像微信），宽屏自动变顶部导航。
-   ========================================================================== */
+/* 跟单系统界面样式：iOS 风格(分组列表、系统字体、44px 触摸目标)，手机底部 Tab，宽屏侧边栏 */
 
 :root{
-  /* 动效缓动曲线（比内置的更有力，进入用 ease-out 才跟手） */
   --ease-out:cubic-bezier(0.23,1,0.32,1);
   --ease-drawer:cubic-bezier(0.32,0.72,0,1);
-  /* 品牌色：韩航蓝 */
+  /* 品牌色 */
   --blue:#1C4E9D; --blue-2:#0047A0; --sky:#71CBEB; --sky-soft:#EAF7FC; --magenta:#EC008C;
   /* iOS 系统灰阶 */
   --bg:#F2F2F7; --card:#FFFFFF; --card-2:#FFFFFF;
   --ink:#000000; --ink-2:#8A8A8E; --ink-3:#C7C7CC;
   --line:#E5E5EA; --line-2:#D1D1D6;
   --ok:#34C759; --ok-soft:#E8F8EC; --bad:#FF3B30; --bad-soft:#FFECEB; --warn:#FF9500; --warn-soft:#FFF3E0;
-  /* 前景配对色：写在有底色的元素上的文字/图标颜色，保证浅色/深色两套都够对比度
-     --on-blue  蓝底按钮上的字（深色模式下 --blue 是浅蓝，白字只有 2.3:1，必须换成深蓝）
-     --on-soft  浅色底(--sky-soft/--card-2)上的蓝色字（亮色模式取值 = 亮色的 --blue-2，外观不变）
-     --ok-ink   浅绿底上的绿色字（--ok 直接放 --ok-soft 上亮色模式只有 1.9:1） */
-  --on-blue:#FFFFFF; --on-soft:#0047A0; --ok-ink:#1E7C3A;
+  /* 有底色元素上的前景色，保证亮/暗两套都够对比度 */
+  --on-blue:#FFFFFF; --on-soft:#0047A0; --ok-ink:#1E7C3A; --warn-ink:#9A5B00;
   --nav-bg:rgba(255,255,255,.82);
   --radius-xs:6px; --radius-sm:10px; --radius:12px; --radius-lg:16px; --radius-pill:99px;
   --nav-h:52px; --tab-h:56px;
-  /* 字号阶梯：同一职能只留一档。原来 14/14.5/15/15.5 四个值在干同一件事，
-     收敛成一套梯子后，改版式只改这里，不用满文件找散落的 px。
-     图标字形(如 ＋ × ›)的 font-size 不走这套 —— 那是图形尺寸，不是排版。
-     --fs-md 必须 ≥16px：iOS Safari 上输入框字号小于 16 会触发自动缩放。 */
+  /* 字号阶梯；--fs-md 必须 ≥16px，否则 iOS 输入框会自动缩放 */
   --fs-micro:11px; --fs-cap:12.5px; --fs-sub:13.5px; --fs-sm:14.5px;
   --fs-body:15.5px; --fs-md:16px; --fs-lg:17px; --fs-xl:23px; --fs-2xl:26px;
-  /* 字距：字号越大收得越紧，大标题和统计数字才不会显得散 */
   --track-tight:-.03em; --track-title:-.02em;
-  /* 阴影分三档：贴地(卡片) / 悬浮(hover 抬起) / 浮层(弹窗、下拉面板) */
+  /* 阴影：卡片 / 悬浮 / 浮层 */
   --shadow:0 1px 2px rgba(0,0,0,.04);
   --shadow-hover:0 6px 20px rgba(16,56,108,.12);
   --shadow-pop:0 18px 44px rgba(0,0,0,.18);
-  /* 卡片描边：阴影在深色底上等于看不见，靠这条 .5px 描边给卡片边界 */
+  /* 深色模式下阴影看不见，靠描边给卡片边界 */
   --card-ring:0 0 0 .5px rgba(0,0,0,.05);
   --safe-b:env(safe-area-inset-bottom,0px);
 }
@@ -46,38 +34,14 @@
     --ink:#FFFFFF; --ink-2:#8E8E93; --ink-3:#48484A;
     --line:#38383A; --line-2:#48484A;
     --ok:#30D158; --ok-soft:#12301C; --bad:#FF453A; --bad-soft:#3A1512; --warn:#FF9F0A; --warn-soft:#3A2A0F;
-    --on-blue:#10386C; --on-soft:#8BADE2; --ok-ink:#30D158;
+    --on-blue:#10386C; --on-soft:#8BADE2; --ok-ink:#30D158; --warn-ink:#FFB340;
     --nav-bg:rgba(28,28,30,.82);
-    /* 深色背景上带蓝调的半透明阴影等于看不见，换成纯黑加深 */
     --shadow:0 1px 2px rgba(0,0,0,.4);
     --shadow-hover:0 6px 20px rgba(0,0,0,.55);
     --shadow-pop:0 18px 44px rgba(0,0,0,.6);
     --card-ring:0 0 0 .5px #38383A;
   }
 }
-:root[data-theme="light"]{
-  --blue:#1C4E9D; --blue-2:#0047A0; --sky:#71CBEB; --sky-soft:#EAF7FC; --magenta:#EC008C;
-  --bg:#F2F2F7; --card:#FFFFFF; --card-2:#FFFFFF;
-  --ink:#000000; --ink-2:#8A8A8E; --ink-3:#C7C7CC;
-  --line:#E5E5EA; --line-2:#D1D1D6;
-  --ok:#34C759; --ok-soft:#E8F8EC; --bad:#FF3B30; --bad-soft:#FFECEB; --warn:#FF9500; --warn-soft:#FFF3E0;
-  --on-blue:#FFFFFF; --on-soft:#0047A0; --ok-ink:#1E7C3A;
-  --nav-bg:rgba(255,255,255,.82); --shadow:0 1px 2px rgba(0,0,0,.04);
-  --shadow-hover:0 6px 20px rgba(16,56,108,.12); --shadow-pop:0 18px 44px rgba(0,0,0,.18);
-  --card-ring:0 0 0 .5px rgba(0,0,0,.05);
-}
-:root[data-theme="dark"]{
-  --blue:#8BADE2; --blue-2:#3188F6; --sky:#71CBEB; --sky-soft:#2B3C43; --magenta:#EC008C;
-  --bg:#000000; --card:#1C1C1E; --card-2:#2C2C2E;
-  --ink:#FFFFFF; --ink-2:#8E8E93; --ink-3:#48484A;
-  --line:#38383A; --line-2:#48484A;
-  --ok:#30D158; --ok-soft:#12301C; --bad:#FF453A; --bad-soft:#3A1512; --warn:#FF9F0A; --warn-soft:#3A2A0F;
-  --on-blue:#10386C; --on-soft:#8BADE2; --ok-ink:#30D158;
-  --nav-bg:rgba(28,28,30,.82); --shadow:0 1px 2px rgba(0,0,0,.4);
-  --shadow-hover:0 6px 20px rgba(0,0,0,.55); --shadow-pop:0 18px 44px rgba(0,0,0,.6);
-  --card-ring:0 0 0 .5px #38383A;
-}
-
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{touch-action:manipulation}
 html,body{margin:0;padding:0}
@@ -92,6 +56,13 @@ button,input,select,textarea{font:inherit;color:inherit}
 img{max-width:100%}
 a{color:var(--blue-2);text-decoration:none}
 .num{font-variant-numeric:tabular-nums}
+.nav-title,.o-title,.m-title,.login-title,.group-title{text-wrap:balance}
+.m-body,.row-sub,.n-what,.lr-text,.log .txt,.perm-sub{text-wrap:pretty}
+/* 键盘焦点可见 */
+.act-btn:focus-visible,.ph-add:focus-within,.imp-drop-btn:focus-visible,.ocard:focus-visible,.contact:focus-visible,
+.row-item.tap:focus-visible,.notif:focus-visible,.dstat:focus-visible,.subnav button:focus-visible{outline:2.5px solid var(--blue-2);outline-offset:2px}
+input[type=search]{-webkit-appearance:none;appearance:none}
+input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none}
 
 /* ---------- 标题栏 ---------- */
 .navbar{
@@ -115,23 +86,21 @@ a{color:var(--blue-2);text-decoration:none}
 .page{max-width:820px;margin:0 auto;padding:14px 14px calc(78px + var(--safe-b));}
 @media(min-width:820px){ .page{padding-bottom:36px} }
 
-/* ---------- 分组区块（iOS inset grouped） ---------- */
+/* ---------- 分组区块 ---------- */
 .group{margin-bottom:22px}
 .group-title{
   font-size:var(--fs-sub);color:var(--ink-2);text-transform:none;letter-spacing:.01em;
   padding:0 16px 7px;font-weight:400;display:flex;align-items:center;min-height:26px;
 }
 .group-title .right{margin-left:auto}
-.group-note{font-size:var(--fs-sub);color:var(--ink-2);padding:7px 16px 0;line-height:1.4}
 
-/* ---- 首页(订单列表)顶部品牌抬头：公司名称 + 跟单系统，不带 logo ---- */
+/* 首页品牌抬头 */
 .home-brand{text-align:center;padding:calc(6px + env(safe-area-inset-top,0)) 16px 6px;background:var(--bg)}
 .home-brand .co{font-size:var(--fs-cap);color:var(--ink-2);font-weight:500}
 .home-brand .app{font-size:var(--fs-lg);font-weight:700;letter-spacing:var(--track-title);margin-top:1px}
 .card{background:var(--card);border-radius:var(--radius-lg);box-shadow:var(--shadow),var(--card-ring);overflow:hidden}
 .card-pad{padding:16px}
 
-/* 列表行 */
 .row-item{
   display:flex;align-items:center;gap:12px;padding:12px 16px;min-height:48px;
   border-bottom:.5px solid var(--line);background:var(--card);
@@ -152,10 +121,10 @@ a{color:var(--blue-2);text-decoration:none}
 .in{
   width:100%;padding:9px 12px;border:.5px solid var(--line-2);border-radius:var(--radius-sm);
   background:var(--bg);color:var(--ink);outline:none;font-size:var(--fs-md);min-height:42px;
+  transition:border-color 150ms ease, box-shadow 150ms ease;
 }
 select.in{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--ink-2) 50%),linear-gradient(135deg,var(--ink-2) 50%,transparent 50%);
   background-position:calc(100% - 16px) 50%,calc(100% - 11px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:34px}
-.in{transition:border-color 150ms ease, box-shadow 150ms ease}
 .in:focus{border-color:var(--blue-2);box-shadow:0 0 0 3.5px color-mix(in srgb,var(--blue-2) 14%,transparent)}
 textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .grid2{display:grid;grid-template-columns:1fr;gap:0}
@@ -176,9 +145,13 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .btn.danger{background:var(--bad);color:#fff}
 .btn.danger.ghost{background:var(--card-2);color:var(--bad)}
 .btn:disabled{opacity:.4}
-.file-btn:disabled{opacity:.4;cursor:not-allowed}
 .btn:focus-visible,.nav-btn:focus-visible,.tab:focus-visible{outline:2.5px solid var(--blue-2);outline-offset:2px}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:14px 16px}
+/* 按钮处理中的小圈，加 .is-busy 才显示 */
+.btn-spin{display:none;width:15px;height:15px;flex:none;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;
+  animation:lbSpin .7s linear infinite}
+.btn.is-busy .btn-spin{display:inline-block}
+.btn.is-busy:disabled{opacity:.75;cursor:progress}
 
 /* ---------- 标签 ---------- */
 .tag{display:inline-flex;align-items:center;padding:2px 9px;border-radius:var(--radius-pill);font-size:var(--fs-cap);
@@ -187,12 +160,16 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .tag.off{background:var(--bad-soft);color:var(--bad)}
 .tag.role{background:var(--bg);color:var(--ink-2);box-shadow:inset 0 0 0 .5px var(--line-2)}
 .tag.season{background:var(--magenta);color:#fff;font-weight:700;padding:3px 10px}
+/* 季节四色轮换(seasonTone) */
+.tag.season.s0{background:#EC008C}
+.tag.season.s1{background:#1C64D1}
+.tag.season.s2{background:#11875A}
+.tag.season.s3{background:#D9480F}
 .tag.hl{background:var(--blue-2);color:#fff;font-weight:700;padding:5px 12px;font-size:var(--fs-body)}
 .badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;
   border-radius:var(--radius-pill);background:var(--bad);color:#fff;font-size:var(--fs-micro);font-weight:600;line-height:1}
 
-/* ---------- 二级分组导航（管理页把七个板块归成四组） ----------
-   手机上横向滚动而不是换行，标签少的时候看起来就是一排普通分段控件 */
+/* ---------- 二级分组导航（手机上横向滚动） ---------- */
 .subnav{display:flex;gap:6px;overflow-x:auto;padding:2px 0 14px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .subnav::-webkit-scrollbar{display:none}
 .subnav button{
@@ -204,10 +181,8 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .subnav button:active{transform:scale(0.96)}
 .subnav button.on{background:var(--blue);color:var(--on-blue);box-shadow:none;font-weight:600}
 
-/* 标签墙：职位/季节/字段/工厂四处都是"一排可删的小标签"，原先各写一遍同样的内联样式 */
 .chip-wall{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
-/* 权限开关行 */
 .perm-row{display:flex;align-items:center;gap:12px;padding:10px 16px;min-height:46px;
   border-bottom:.5px solid var(--line)}
 .perm-row:last-child{border-bottom:0}
@@ -216,7 +191,7 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .perm-name{font-size:var(--fs-md)}
 .perm-sub{font-size:var(--fs-cap);color:var(--ink-2);margin-top:1px;line-height:1.4}
 
-/* ---------- 底部 Tab 栏（宽屏自动变顶部） ---------- */
+/* ---------- 底部 Tab 栏（宽屏变顶部） ---------- */
 .tabbar{
   position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;
   background:var(--nav-bg);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
@@ -225,12 +200,12 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .tab{
   flex:1;background:none;border:0;cursor:pointer;color:var(--ink-2);
   padding:7px 2px 6px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:var(--fs-micro);min-height:52px;
+  transition:opacity 140ms ease, transform 140ms var(--ease-out);
 }
 .tab .ti{width:26px;height:26px;line-height:1;position:relative;display:flex;align-items:center;justify-content:center}
 .tab .ti svg{width:25px;height:25px;display:block}
 .tab .ti .badge{position:absolute;top:-4px;left:12px}
 .tab.on{color:var(--blue-2)}
-.tab{transition:opacity 140ms ease, transform 140ms var(--ease-out)}
 .tab:active{opacity:.6;transform:scale(0.94)}
 @media(min-width:820px){
   .tabbar{position:sticky;top:52px;bottom:auto;border-top:0;border-bottom:.5px solid var(--line);
@@ -239,18 +214,20 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
   .tab .ti{width:19px;height:19px}
   .tab .ti svg{width:19px;height:19px}
   .tab .ti .badge{position:static}
-  /* 宽屏选中态是浅蓝底，字色跟着换成"浅底专用蓝"，深色模式下才够对比度 */
   .tab.on{background:var(--sky-soft);color:var(--on-soft)}
 }
 
 /* ---------- 订单卡片 ---------- */
-.ocard{display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:.5px solid var(--line);cursor:pointer;background:var(--card)}
-.ocard:last-child{border-bottom:0}
-.ocard{transition:background-color 140ms ease, transform 140ms var(--ease-out)}
-.ocard:active{background:var(--bg);transform:scale(0.988)}
-.thumb{width:52px;height:52px;border-radius:var(--radius-sm);background:var(--sky-soft);flex:none;
+.ocard,.contact{display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:.5px solid var(--line);cursor:pointer;
+  background:var(--card);transition:background-color 140ms ease, transform 140ms var(--ease-out)}
+.ocard:last-child,.contact:last-child{border-bottom:0}
+.ocard:active,.contact:active{background:var(--bg);transform:scale(0.988)}
+.thumb{position:relative;width:52px;height:52px;border-radius:var(--radius-sm);background:var(--sky-soft);flex:none;
   display:flex;align-items:center;justify-content:center;color:var(--on-soft);font-size:var(--fs-micro);overflow:hidden}
 .thumb img{width:100%;height:100%;object-fit:cover}
+.thumb::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.08);pointer-events:none}
+.thumb-ph{width:26px;height:26px;opacity:.7;display:flex}
+.thumb-ph svg{width:26px;height:26px}
 .o-main{flex:1;min-width:0}
 .o-title{font-weight:600;font-size:var(--fs-lg);display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 .o-meta{font-size:var(--fs-sub);color:var(--ink-2);margin-top:2px;display:flex;gap:12px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
@@ -258,22 +235,27 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 
 /* ---------- 打卡日志 ---------- */
 .logfield{border-bottom:.5px solid var(--line);padding:12px 16px}
-/* 生产进度：这是"主厂+加工点"这一组的分类标题，不是能点的字段，用高亮小标签跟字段头做区分 */
 .prodgroup-title{padding:10px 16px}
 .prodgroup-title span{font-weight:600;font-size:var(--fs-body)}
 .logfield:last-child{border-bottom:0}
 .lf-head{display:flex;align-items:center;gap:8px;font-weight:600;font-size:var(--fs-body)}
 .lf-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blue-2);margin-right:7px;vertical-align:middle}
 .lf-head .cnt{color:var(--ink-2);font-weight:400;font-size:var(--fs-sub)}
+.fac-head{flex-wrap:wrap;row-gap:8px;font-size:var(--fs-sm)}
+.fac-kind{flex:none;white-space:nowrap}
+.fac-head .tag.hl{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .right{margin-left:auto}
 .log{margin:8px 0 0;padding:0;list-style:none}
 .log li{padding:8px 0;border-top:.5px solid var(--line)}
+/* 分隔线只画在两条记录之间 */
+.log > li:first-child{border-top:0;padding-top:4px}
 .log .meta{font-size:var(--fs-cap);color:var(--ink-2);display:flex;gap:7px;align-items:center;flex-wrap:wrap}
 .log .meta b{color:var(--ink);font-weight:600}
 .log .txt{white-space:pre-wrap;margin-top:2px;font-size:var(--fs-body)}
 .addbox{margin-top:9px;display:none}
 .addbox.show{display:block}
 .empty{color:var(--ink-2);font-size:var(--fs-sm);padding:12px 16px;text-align:center}
+.log-groups{display:flex;flex-direction:column;gap:14px}
 .loglist .logrow{padding:12px 16px;border-bottom:.5px solid var(--line)}
 .loglist .logrow:last-child{border-bottom:0}
 .lr-top{display:flex;align-items:center;gap:8px;font-size:var(--fs-sub);flex-wrap:wrap;color:var(--ink-2)}
@@ -290,21 +272,43 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .lbl.f2{background:var(--ok-soft);color:var(--ok-ink)}
 
 /* ---------- 筛选 ---------- */
-.filters{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 16px}
-@media(min-width:700px){.filters{grid-template-columns:repeat(4,1fr)}}
+/* 手机：搜索独占一行，筛选是一排可横滑的胶囊，选中的变蓝 */
+.filters{padding:12px 16px}
+.f-kw{border-radius:var(--radius-pill);padding-left:16px}
+.f-chips{display:flex;gap:8px;margin:10px -16px 0;padding:0 16px 2px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  scroll-padding:0 16px}
+.f-chips::-webkit-scrollbar{display:none}
+.f-chips select.in{flex:none;width:auto;max-width:62vw;min-height:36px;padding:6px 30px 6px 14px;border-radius:var(--radius-pill);
+  background-color:var(--bg);background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%}
+.f-chips select.in.on{background-color:var(--sky-soft);border-color:transparent;color:var(--on-soft);font-weight:600}
+@media(min-width:700px){
+  .filters{display:grid;grid-template-columns:minmax(200px,1.4fr) 3fr;gap:10px;align-items:center}
+  .f-chips{margin:0;padding:0;flex-wrap:wrap;overflow:visible}
+  .f-kw{min-height:40px}
+}
 
-/* ---------- 表格 ----------
-   左右内边距跟卡片里其它行(.row-item/.field/.card-pad)一样是 16px，
-   表格上面的搜索框和下面的分页条才对得上同一条左边线 */
+/* ---------- 表格 ---------- */
 .tbl-wrap{overflow-x:auto}
 table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width:460px;font-variant-numeric:tabular-nums}
-/* 表格里的小号下拉（员工职位那一列），原先是写在 HTML 里的一串内联样式 */
 .tbl-select{width:auto;min-height:34px;padding:4px 30px 4px 10px;font-size:var(--fs-sm)}
 .tbl th{text-align:left;color:var(--ink-2);font-weight:400;font-size:var(--fs-sub);padding:9px 16px;border-bottom:.5px solid var(--line);white-space:nowrap}
 .tbl td{border-bottom:.5px solid var(--line);padding:12px 16px;vertical-align:middle}
 .tbl tr:last-child td{border-bottom:0}
-/* 鼠标扫读时整行跟随高亮，比一条条细分割线更容易对齐看；触屏设备不触发 */
 @media (hover:hover){ .tbl tr:hover td{background:var(--bg)} }
+/* 员工表在手机上改为每人一块，避免操作按钮藏到屏幕外 */
+@media (max-width:640px){
+  .tbl.stack{min-width:0}
+  .tbl.stack tr:first-child{display:none}
+  .tbl.stack tr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name role" "phone role" "acts acts";
+    column-gap:12px;padding:12px 16px;border-bottom:.5px solid var(--line)}
+  .tbl.stack tr:last-child{border-bottom:0}
+  .tbl.stack td{padding:0;border:0;background:none}
+  .tbl.stack td:nth-child(1){grid-area:name;font-weight:600}
+  .tbl.stack td:nth-child(2){grid-area:phone;color:var(--ink-2);font-size:var(--fs-sub)}
+  .tbl.stack td:nth-child(3){grid-area:role;align-self:center}
+  .tbl.stack td:nth-child(4){grid-area:acts;display:flex;flex-wrap:wrap;gap:8px;padding-top:10px}
+  .tbl.stack td[colspan]{grid-column:1 / -1}
+}
 
 /* ---------- 登录 ---------- */
 .login-page{
@@ -319,7 +323,6 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 .login-logo svg{width:100%;height:100%;display:block}
 .login-company{font-size:var(--fs-sm);color:var(--ink-2);font-weight:500;margin:0 0 4px}
 .login-title{font-size:var(--fs-2xl);font-weight:700;letter-spacing:var(--track-tight);margin:0}
-.login-sub{color:var(--ink-2);font-size:var(--fs-sm);margin:8px 0 0}
 .login-card{background:var(--card);border-radius:var(--radius-lg);overflow:hidden;
   box-shadow:0 4px 24px rgba(18,59,109,.07),0 1px 2px rgba(0,0,0,.04);margin-bottom:18px}
 .lg-field{display:block;padding:12px 16px}
@@ -330,44 +333,32 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 .lg-field:focus-within{background:color-mix(in srgb,var(--sky-soft) 50%,var(--card))}
 .login-btn{height:50px;font-size:var(--fs-lg);
   box-shadow:0 8px 20px color-mix(in srgb,var(--blue) 28%,transparent)}
-.login-foot{text-align:center;margin-top:14px}
 
-/* ---------- 中文日期 / 文件选择控件 ---------- */
-.datefield,.filefield{position:relative}
-/* 日期：原生 input 盖满整个按钮直接接收点击/触摸，不依赖 showPicker()——
-   部分手机浏览器(尤其旧版 iOS Safari)不支持 showPicker()，靠 JS 模拟点击弹不出系统日期轮，
-   让用户的点击/触摸真正落在原生控件上才是跨设备最可靠的办法 */
-/* opacity 故意不写 0，写成接近 0 的值——WebKit(Safari，桌面/iPhone 共用同一套内核)对
-   opacity:0 的 input[type=date] 有已知问题：点了会正常拿到焦点，但死活不弹系统日期选择器；
-   给一点点非零透明度能让 Safari 把它当作"确实显示了"，同时肉眼完全看不出区别 */
+/* ---------- 中文日期控件 ---------- */
+.datefield{position:relative}
+/* 原生日期框盖满按钮直接接收点击(部分手机不支持 showPicker)；
+   opacity 不能写 0，Safari 对全透明的日期框不弹选择器 */
 .date-native{position:absolute;inset:0;width:100%;height:100%;opacity:.011;cursor:pointer;
   border:0;padding:0;margin:0;z-index:1}
 .file-native{position:absolute;left:14px;bottom:2px;width:1px;height:1px;
   opacity:0;pointer-events:none;border:0;padding:0;margin:0}
-.date-btn,.file-btn{display:flex;align-items:center;justify-content:space-between;gap:10px;
+.date-btn{display:flex;align-items:center;justify-content:space-between;gap:10px;
   text-align:left;cursor:pointer;background:var(--bg)}
 .date-btn.empty{color:var(--ink-2)}
-.file-name{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.file-pick{flex:none;color:var(--blue-2);font-size:var(--fs-sm)}
 
 /* ---------- 聊天 ---------- */
 .avatar{width:42px;height:42px;flex:none;border-radius:50%;background:var(--sky-soft);color:var(--on-soft);
   display:inline-flex;align-items:center;justify-content:center;font-weight:600;font-size:var(--fs-lg)}
 .avatar.sm{width:30px;height:30px;font-size:var(--fs-sub)}
-.contact{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:.5px solid var(--line);cursor:pointer;background:var(--card)}
-.contact:last-child{border-bottom:0}
-.contact{transition:background-color 140ms ease, transform 140ms var(--ease-out)}
-.contact:active{background:var(--bg);transform:scale(0.988)}
 .c-main{flex:1;min-width:0}
 .c-top{display:flex;align-items:center;gap:7px}
 .c-top b{font-size:var(--fs-md);font-weight:600}
-.c-role{font-size:var(--fs-cap);color:var(--ink-2)}
 .c-time{font-size:var(--fs-cap);color:var(--ink-2);margin-left:auto}
 .c-last{font-size:var(--fs-sm);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 
 .chat-card{display:flex;flex-direction:column;padding:0;overflow:hidden;background:var(--bg);border-radius:var(--radius-lg)}
 .chat-msgs{padding:14px;overflow-y:auto;height:min(58vh,470px);background:var(--bg);-webkit-overflow-scrolling:touch}
-/* 会话页占满可视区域，输入框贴在底部（像微信） */
+/* 会话页占满可视区域，输入框贴底 */
 .page.chat-full{padding:0;height:calc(100dvh - var(--nav-h) - var(--tab-h));display:flex;flex-direction:column}
 .page.chat-full .chat-card{flex:1;min-height:0;border-radius:0}
 .page.chat-full .chat-msgs{flex:1;min-height:0;height:auto}
@@ -377,7 +368,6 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 .bubble{max-width:74%;background:var(--card);border-radius:var(--radius-lg);padding:8px 13px;font-size:var(--fs-md);line-height:1.4;
   white-space:pre-wrap;word-break:break-word;box-shadow:var(--shadow)}
 .bubble-row.mine .bubble{background:var(--blue-2);color:#fff}
-.b-time{display:block;font-size:var(--fs-micro);opacity:.55;margin-top:3px;text-align:right}
 .b-img{display:block;max-width:220px;border-radius:var(--radius);margin:-2px 0 2px}
 .b-file{display:flex;align-items:center;gap:9px;padding:8px 4px 4px;min-width:180px}
 .b-file .fi{font-size:26px;line-height:1}
@@ -395,10 +385,47 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 .att-bar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--sky-soft);font-size:var(--fs-sm)}
 .att-bar .x{margin-left:auto;cursor:pointer;color:var(--ink-2);font-size:19px;padding:0 4px}
 
-/* ---------- 导入预览 ---------- */
+/* ---------- 批量导入 ---------- */
+.imp-drop{position:relative;border-radius:var(--radius);transition:box-shadow 140ms ease, background-color 140ms ease}
+.imp-drop.drop{background:var(--sky-soft);box-shadow:0 0 0 2px var(--blue-2)}
+.imp-drop-btn{width:100%;display:flex;flex-direction:column;align-items:center;gap:4px;padding:18px 14px;cursor:pointer;
+  border:1.5px dashed var(--line-2);border-radius:var(--radius);background:var(--bg);color:var(--ink);text-align:center;
+  transition:border-color 140ms ease, transform 140ms var(--ease-out)}
+.imp-drop-btn:active{transform:scale(0.985)}
+.imp-drop-btn:disabled{opacity:.55;cursor:progress}
+@media (hover:hover){ .imp-drop-btn:hover{border-color:var(--blue-2)} }
+.imp-drop-ic{width:30px;height:30px;color:var(--blue-2);display:flex}
+.imp-drop-ic svg{width:30px;height:30px}
+.imp-drop-main{font-weight:600;font-size:var(--fs-md);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imp-drop-sub{font-size:var(--fs-cap);color:var(--ink-2)}
+.imp-drop-desk{display:none}
+@media (hover:hover) and (pointer:fine){ .imp-drop-desk{display:inline} }
+.imp-help{font-size:var(--fs-sub);color:var(--ink-2);margin:10px 2px 0;line-height:1.5;text-wrap:pretty}
+.imp-paste{margin-top:10px}
+.imp-paste summary{cursor:pointer;color:var(--blue-2);font-size:var(--fs-sm);padding:6px 2px;list-style:none;min-height:36px;display:flex;align-items:center}
+.imp-paste summary::-webkit-details-marker{display:none}
+.imp-paste summary::before{content:"›";display:inline-block;margin-right:6px;transition:transform 160ms var(--ease-out)}
+.imp-paste[open] summary::before{transform:rotate(90deg)}
+.imp-paste textarea{margin-top:4px}
+.imp-summary{margin:4px 16px 10px;padding:11px 14px;border-radius:var(--radius);background:var(--sky-soft);color:var(--ink)}
+.imp-summary.warn{background:var(--warn-soft)}
+.imp-sum-main{font-size:var(--fs-sm)}
+.imp-sum-sub{font-size:var(--fs-cap);color:var(--ink-2);margin-top:3px;line-height:1.45}
 .imp-block{border-radius:var(--radius);background:var(--bg);margin:10px 16px;overflow:hidden}
-/* 内层 .field 是 16px 左右内边距，标题也用 16px，一个面板里不要出现两条左边线 */
-.imp-head{display:flex;align-items:center;padding:10px 16px;font-weight:600;font-size:var(--fs-body)}
+.imp-block.has-warn{box-shadow:inset 3px 0 0 var(--warn)}
+.imp-head{display:flex;align-items:center;gap:8px;padding:10px 12px 10px 16px;font-weight:600;font-size:var(--fs-body);
+  cursor:pointer;list-style:none;min-height:48px}
+.imp-head::-webkit-details-marker{display:none}
+.imp-no{flex:none;min-width:22px;height:22px;padding:0 6px;border-radius:99px;background:var(--card);color:var(--ink-2);
+  font-size:var(--fs-cap);display:inline-flex;align-items:center;justify-content:center}
+.imp-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imp-block:not([open]) .imp-head::after{content:"展开";font-size:var(--fs-cap);font-weight:400;color:var(--blue-2)}
+.imp-warns{margin:0 16px 8px;padding:8px 12px 8px 26px;border-radius:var(--radius-sm);background:var(--warn-soft);
+  font-size:var(--fs-sub);line-height:1.5;color:var(--ink)}
+.imp-actions{position:sticky;bottom:calc(var(--tab-h) + var(--safe-b));z-index:5;background:var(--card);
+  border-top:.5px solid var(--line)}
+@media(min-width:1024px){ .imp-actions{bottom:0} }
+.tag.warn{background:var(--warn-soft);color:var(--warn-ink);font-weight:600;flex:none}
 
 /* ---------- 弹窗 ---------- */
 .mask{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;z-index:60;padding:20px}
@@ -420,10 +447,10 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   transition:opacity 200ms var(--ease-out), transform 200ms var(--ease-out);pointer-events:none;max-width:86vw;text-align:center}
 .msg.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
-/* ---------- 工厂多选(面料工厂/绣印工厂可挂多个供应商) ---------- */
+/* ---------- 工厂多选 ---------- */
 .multifactory-chips{display:flex;flex-wrap:wrap;gap:8px}
 
-/* ---- 安装引导 ---- */
+/* ---------- 安装引导 ---------- */
 .install-cta{margin-top:12px}
 .guide{text-align:left}
 .guide-step{font-size:var(--fs-body);line-height:1.7;padding:4px 0}
@@ -433,49 +460,93 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 .guide-note{margin-top:10px;font-size:var(--fs-sub);color:var(--ink-2);background:var(--sky-soft);
   border-radius:var(--radius-sm);padding:8px 11px;line-height:1.5}
 
-/* ---- 照片：缩略图网格 + 选择器 ---- */
-.photos-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+/* ---------- 照片 ---------- */
+.photos-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;border-radius:var(--radius);
+  transition:box-shadow 140ms ease, background-color 140ms ease}
 .photos-grid.ro{margin-top:6px}
+.photos-grid.drop{background:var(--sky-soft);box-shadow:0 0 0 2px var(--blue-2);outline-offset:4px}
 .ph-thumb{position:relative;width:76px;height:76px;border-radius:var(--radius-sm);overflow:hidden;background:var(--bg);flex:none}
-.ph-thumb img{width:100%;height:100%;object-fit:cover;cursor:pointer;display:block;transition:transform 140ms var(--ease-out)}
+.ph-thumb::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.1);pointer-events:none}
+.ph-thumb img{width:100%;height:100%;object-fit:cover;cursor:zoom-in;display:block;transition:transform 140ms var(--ease-out)}
 .ph-thumb img:active{transform:scale(0.94)}
-.ph-x{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;
-  background:rgba(0,0,0,.55);color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;line-height:1}
+/* 删除叉的点击范围扩到 36px */
+.ph-x{position:absolute;top:3px;right:3px;z-index:2;width:22px;height:22px;padding:0;border:0;border-radius:50%;
+  background:rgba(0,0,0,.55);color:#fff;font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.ph-x::before{content:"";position:absolute;inset:-7px}
+.ph-cover{position:absolute;left:0;right:0;bottom:0;z-index:1;padding:2px 0;text-align:center;font-size:var(--fs-micro);
+  font-weight:600;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.55));pointer-events:none}
+/* 上传中：本地预览 + 进度条；预览出来前是占位 */
+.ph-pending img{cursor:default;filter:saturate(.6) brightness(.92)}
+.ph-skel{position:absolute;inset:0;background:var(--line);animation:phPulse 1.1s ease-in-out infinite alternate}
+@keyframes phPulse{from{opacity:.55}to{opacity:1}}
+.ph-bar{position:absolute;left:8px;right:8px;bottom:8px;height:4px;border-radius:99px;background:rgba(255,255,255,.55);overflow:hidden;
+  box-shadow:0 0 0 .5px rgba(0,0,0,.08)}
+.ph-bar i{display:block;height:100%;width:0;border-radius:inherit;background:var(--blue-2);transition:width 200ms ease}
+.ph-retry{position:absolute;inset:0;border:0;padding:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  background:rgba(0,0,0,.5);color:#fff;font-size:var(--fs-cap);font-weight:600}
+.ph-retry svg{width:20px;height:20px}
+.ph-errmsg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);color:#fff;
+  font-size:var(--fs-micro);font-weight:600;text-align:center;padding:0 6px}
 .ph-add{width:76px;height:76px;border-radius:var(--radius-sm);border:1.5px dashed var(--line-2);background:var(--bg);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;
-  color:var(--ink-2);font-size:var(--fs-cap);flex:none}
-.ph-add:active{opacity:.6}
-.ph-plus{font-size:22px;line-height:1;color:var(--blue-2)}
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;
+  color:var(--ink-2);font-size:var(--fs-cap);flex:none;transition:transform 140ms var(--ease-out), border-color 140ms ease}
+.ph-add:active{transform:scale(0.95)}
+@media (hover:hover){ .ph-add:hover{border-color:var(--blue-2);color:var(--blue-2)} }
+.ph-ic{width:24px;height:24px;color:var(--blue-2);display:flex}
+.ph-ic svg{width:24px;height:24px}
 
-/* ---- 大图查看器 ---- */
-.lightbox{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.92);animation:fadeIn 180ms ease;
-  display:flex;align-items:center;justify-content:center;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
-.lightbox .lb-img{max-width:100%;max-height:100%;object-fit:contain;touch-action:none;
-  will-change:transform;transform-origin:center center;user-select:none;-webkit-user-drag:none}
-.lb-bar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;
-  padding:calc(env(safe-area-inset-top,0) + 10px) 16px 10px;color:#fff}
-.lb-count{font-size:var(--fs-body);opacity:.85}
-.lb-close{background:rgba(255,255,255,.15);border:0;color:#fff;width:36px;height:36px;border-radius:50%;font-size:18px;cursor:pointer}
-.lb-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.14);border:0;color:#fff;
-  width:44px;height:44px;border-radius:50%;font-size:26px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+/* ---------- 大图查看器 ----------
+   背景透明度由脚本通过 --lb-bg 控制；手势全部由脚本接管 */
+html.lb-open,html.lb-open body{overflow:hidden}
+.lightbox{position:fixed;inset:0;z-index:80;touch-action:none;user-select:none;-webkit-user-select:none;
+  background:rgba(0,0,0,calc(var(--lb-bg,1) * .96));overflow:hidden;animation:fadeIn 160ms ease;transition:opacity 150ms ease}
+.lb-track{position:absolute;inset:0;will-change:transform}
+.lb-slide{position:absolute;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center}
+.lb-slide img{max-width:100%;max-height:100%;object-fit:contain;display:block;will-change:transform;transform-origin:center center;
+  -webkit-user-drag:none;-webkit-touch-callout:default;opacity:0;transition:opacity 160ms ease}
+.lb-slide.ok img{opacity:1}
+.lb-spin{position:absolute;width:28px;height:28px;border-radius:50%;border:2.5px solid rgba(255,255,255,.25);border-top-color:#fff;
+  animation:lbSpin .8s linear infinite}
+.lb-slide.ok .lb-spin,.lb-slide.bad .lb-spin{display:none}
+@keyframes lbSpin{to{transform:rotate(360deg)}}
+.lb-fail{display:none;position:absolute;color:rgba(255,255,255,.7);font-size:var(--fs-sm)}
+.lb-slide.bad .lb-fail{display:block}
+.lb-bar{position:absolute;top:0;left:0;right:0;z-index:2;display:flex;align-items:center;justify-content:space-between;
+  padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px 18px;color:#fff;
+  background:linear-gradient(rgba(0,0,0,.35),transparent);opacity:var(--lb-bg,1)}
+.lb-count{font-size:var(--fs-body);font-weight:500;opacity:.9}
+.lb-acts{display:flex;gap:8px}
+.lb-btn{width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,255,255,.16);color:#fff;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:17px;line-height:1;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:background-color 140ms ease, transform 140ms var(--ease-out)}
+.lb-btn svg{width:20px;height:20px}
+.lb-btn[hidden]{display:none}
+.lb-btn:active{transform:scale(0.92)}
+@media (hover:hover){ .lb-btn:hover{background:rgba(255,255,255,.28)} }
+.lb-nav{position:absolute;top:50%;z-index:2;transform:translateY(-50%);background:rgba(255,255,255,.14);border:0;color:#fff;
+  width:44px;height:44px;border-radius:50%;font-size:26px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);opacity:var(--lb-bg,1)}
+.lb-nav[hidden]{display:none}
 .lb-nav.prev{left:12px}
 .lb-nav.next{right:12px}
-/* 详情里款式图整行展示 */
-.row-item.col{flex-direction:column;align-items:stretch}
-.row-item.col .row-label{margin-bottom:2px}
+/* 左右按钮只在有鼠标的设备上显示，放大后隐藏 */
+@media (hover:none){ .lb-nav{display:none} }
+.lightbox.lb-zoomed .lb-nav{display:none}
+.lightbox .lb-btn:focus-visible,.lightbox .lb-nav:focus-visible{outline:2px solid #fff;outline-offset:2px}
 
-/* ---------- 动效基础 ---------- */
+/* ---------- 动效 ---------- */
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 
-/* 尊重"减少动态效果"系统设置：去掉位移/缩放，保留必要的淡入淡出 */
+/* 减少动态效果：去掉位移/缩放，只留淡入淡出 */
 @media (prefers-reduced-motion: reduce){
   *{animation-duration:0.01ms !important;animation-iteration-count:1 !important}
   .btn:active,.tab:active,.ocard:active,.contact:active,.ph-thumb img:active{transform:none}
   .msg{transition:opacity 200ms ease}
   .mask.show,.mask.show .modal,.lightbox{animation:fadeIn 150ms ease}
+  .ph-skel,.lb-spin{animation:none}
 }
 
-/* ---- 大类标题高亮（订单明细/生产明细/验货问题/跟单小结） ---- */
+/* 大类标题 */
 .cat-title{
   display:inline-flex;align-items:center;
   background:var(--magenta);color:#fff;
@@ -483,12 +554,11 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   padding:5px 14px;border-radius:var(--radius-pill);
 }
 
-/* ---- 详情页头部款式图缩略 ---- */
 .header-thumb{width:64px;height:64px;border-radius:var(--radius);object-fit:cover;cursor:pointer;flex:none;box-shadow:var(--shadow)}
 
-/* ---- 行内小动作按钮（改/删/改名/删除/填写/补充说明），替代裸文字链接 ---- */
+/* ---------- 行内小按钮（改/删等） ---------- */
 .act-btn{
-  display:inline-flex;align-items:center;justify-content:center;
+  position:relative;display:inline-flex;align-items:center;justify-content:center;
   background:var(--sky-soft);color:var(--on-soft);
   font-size:var(--fs-cap);font-weight:600;line-height:1;
   padding:6px 12px;min-height:28px;border-radius:var(--radius-pill);
@@ -496,18 +566,17 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   transition:transform 140ms var(--ease-out), background-color 140ms ease, opacity 140ms ease;
 }
 .act-btn:active{transform:scale(0.93)}
+/* 点击范围上下各扩 8px */
+.act-btn::before{content:"";position:absolute;inset:-8px -3px}
 .act-btn.danger{background:var(--bad-soft);color:var(--bad)}
 .act-btn.ghost{background:transparent;box-shadow:inset 0 0 0 1px var(--line-2);color:var(--ink-2)}
 .act-btn + .act-btn{margin-left:7px}
 .act-row{display:inline-flex;align-items:center;flex-wrap:wrap;gap:0}
 
-/* ==========================================================================
-   应用内通知（手机端在「我的 > 消息通知」，桌面端在顶部铃铛下拉里，两边共用一套样式）
-   ========================================================================== */
+/* ---------- 应用内通知（手机「我的」页和桌面铃铛下拉共用） ---------- */
 .notif{display:flex;gap:10px;align-items:flex-start;padding:12px 16px;cursor:pointer;
-  background:var(--card);border-bottom:.5px solid var(--line)}
+  background:var(--card);border-bottom:.5px solid var(--line);transition:background-color 140ms ease}
 .notif:last-child{border-bottom:0}
-.notif{transition:background-color 140ms ease}
 .notif:active{background:var(--bg)}
 .notif .n-dot{width:7px;height:7px;border-radius:50%;background:transparent;flex:none;margin-top:7px}
 .notif.un .n-dot{background:var(--bad)}
@@ -515,7 +584,6 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 .n-main{flex:1;min-width:0}
 .n-text{font-size:var(--fs-body);line-height:1.45;word-break:break-word}
 .n-time{font-size:var(--fs-cap);color:var(--ink-2);margin-top:2px}
-/* 卡片式通知(带头像/订单号胶囊)：谁 + 哪张单 + 改了什么，一眼看清 */
 .notif.rich .avatar{margin-top:1px}
 .n-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:2px}
 .n-actor{font-size:var(--fs-sm);font-weight:600}
@@ -523,25 +591,24 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 .n-what{font-size:var(--fs-sm);line-height:1.45;word-break:break-word;color:var(--ink-2)}
 .notif.rich.un .n-what{font-weight:600;color:var(--ink)}
 .notif.rich.un{background:var(--sky-soft);box-shadow:inset 3px 0 0 var(--blue-2)}
+.n-del{position:relative;flex:none;width:28px;height:28px;margin:-4px -8px -4px 0;border:0;border-radius:50%;
+  background:transparent;color:var(--ink-3);font-size:13px;cursor:pointer;transition:background-color 140ms ease,color 140ms ease}
+.n-del::before{content:"";position:absolute;inset:-8px}
+.n-del:hover,.n-del:focus-visible{background:var(--bad-soft);color:var(--bad)}
+.np-acts{display:inline-flex;gap:4px}
 .tag.order{background:var(--bg);color:var(--ink-2);font-size:var(--fs-micro);font-weight:600;padding:2px 8px;
   box-shadow:inset 0 0 0 .5px var(--line-2)}
 
-/* ==========================================================================
-   桌面端（≥1024px）：左侧固定侧边栏 + 顶部条 + 更宽的内容排布
-   —— 下面这些块在窄屏下一律 display:none，手机端看到的界面跟以前完全一致，
-      所有改动都被 @media(min-width:1024px) 包住，不影响 1023px 及以下。
-   ========================================================================== */
+/* ---------- 桌面端（≥1024px）：侧边栏 + 顶部条，窄屏下这些块都隐藏 ---------- */
 .dsidebar,.dheader,.dstats-wrap{display:none}
-/* 概览卡片是 <button>（整张卡片可点击去筛选订单）。浏览器默认会给 button 描一圈边框，
-   这里在媒体查询外面就先清掉：即使样式表被浏览器缓存成旧版本、只加载到这一段，
-   也不会出现一圈黑色描边——卡片一律只靠阴影跟背景区分，跟页面里其它卡片保持一致。 */
+/* 概览卡片是 <button>，先清掉默认边框 */
 .dstat{appearance:none;-webkit-appearance:none;border:0;background:var(--card);
   color:inherit;font:inherit;text-align:left;width:100%}
 
 @media(min-width:1024px){
   :root{--side-w:236px;--dh-h:60px}
 
-  /* ---- 左侧侧边栏 ---- */
+  /* 侧边栏 */
   .dsidebar{display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0;width:var(--side-w);
     background:var(--card);border-right:.5px solid var(--line);z-index:50}
   .ds-brand{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:.5px solid var(--line)}
@@ -568,7 +635,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   .ds-me-name{font-size:var(--fs-sm);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .ds-me-role{font-size:var(--fs-cap);color:var(--ink-2)}
 
-  /* ---- 顶部条：全局搜索 + 通知铃铛 + 当前用户 ---- */
+  /* 顶部条 */
   .dheader{display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:52;
     height:var(--dh-h);padding:0 28px;margin-left:var(--side-w);
     background:var(--nav-bg);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);
@@ -590,7 +657,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   .dh-user{display:flex;align-items:center;gap:8px;padding-left:12px;border-left:.5px solid var(--line)}
   .dh-uname{font-size:var(--fs-sm);font-weight:600}
 
-  /* ---- 通知下拉 ---- */
+  /* 通知下拉 */
   .notif-back{position:fixed;inset:0;z-index:54}
   .notif-panel{position:absolute;top:calc(var(--dh-h) - 4px);right:24px;width:384px;max-height:min(70vh,520px);
     display:flex;flex-direction:column;background:var(--card);border-radius:var(--radius-lg);z-index:55;overflow:hidden;
@@ -602,7 +669,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   .np-foot{border-top:.5px solid var(--line)}
   .notif:hover{background:var(--bg)}
 
-  /* ---- 主内容区：让出侧边栏宽度，铺满剩余横向空间 ---- */
+  /* 主内容区 */
   .home-brand{display:none}
   .tabbar{display:none}
   .navbar{position:static;margin-left:var(--side-w);background:transparent;border-bottom:0;
@@ -610,8 +677,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   .navbar-in{max-width:none;padding:22px 28px 6px;height:auto}
   .nav-title{text-align:left;font-size:var(--fs-xl);font-weight:700;letter-spacing:var(--track-tight)}
   .nav-slot{min-width:0}
-  /* 桌面端侧边栏已经能直接跳转到任何页面，"‹ 返回上一页"这种手机手势式按钮没有意义，
-     换成面包屑（父级仍可点回去，同时显示当前所在位置），右侧操作按钮（＋新建/全部已读等）保留 */
+  /* 桌面端用面包屑代替返回按钮 */
   .nav-slot:not(.right){display:none}
   .dbreadcrumb{display:flex;align-items:center;gap:6px;margin-left:var(--side-w);
     padding:16px 28px 0;font-size:var(--fs-sub);color:var(--ink-2)}
@@ -624,13 +690,11 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   .page.chat-full .chat-card{border-radius:var(--radius-lg)}
   .msg{left:calc(50% + var(--side-w) / 2);bottom:32px}
 
-  /* 筛选条：宽屏一行放得下就一行，放不下自动换，不留半行空白 */
-  .filters{grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  .filters{grid-template-columns:minmax(220px,340px) 1fr}
 
-  /* ---- 概览统计卡片（只在宽屏出现） ---- */
+  /* 概览统计卡片 */
   .dstats-wrap{display:block}
   .dstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
-  /* 每张卡片都是可点击的筛选入口 */
   .dstat{display:flex;align-items:flex-start;gap:12px;background:var(--card);
     border-radius:var(--radius-lg);box-shadow:var(--shadow);padding:15px 18px;
     width:100%;border:0;text-align:left;cursor:pointer;font:inherit;color:inherit;
@@ -643,16 +707,14 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
     background:var(--sky-soft);color:var(--on-soft)}
   .dstat-ic svg{width:20px;height:20px}
   .dstat-ic.ok{background:var(--ok-soft);color:var(--ok-ink)}
-  /* 「进行中」是提醒不是错误：底色用 --warn-soft，不再借用红色系的 --bad-soft */
   .dstat-ic.warn{background:var(--warn-soft);color:var(--warn)}
-  /* 浅蓝底上的 --sky 图标亮色模式只有 1.6:1，几乎看不见，统一回浅底专用蓝 */
   .dstat-ic.sky{background:var(--sky-soft);color:var(--on-soft)}
   .dstat-main{min-width:0}
   .dstat-label{font-size:var(--fs-cap);color:var(--ink-2)}
   .dstat-num{font-size:var(--fs-2xl);font-weight:700;letter-spacing:var(--track-tight);line-height:1.22;font-variant-numeric:tabular-nums}
   .dstat-sub{font-size:var(--fs-cap);color:var(--ink-2)}
 
-  /* ---- 订单列表：宽屏改成多栏卡片网格，不再是一条条纵向堆叠 ---- */
+  /* 订单列表：多栏卡片网格 */
   .olist{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;
     background:transparent;box-shadow:none;border-radius:0;overflow:visible}
   .olist .ocard{background:var(--card);border-radius:var(--radius-lg);box-shadow:var(--shadow);
@@ -662,7 +724,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   .olist .ocard .chev{align-self:center}
   .olist .empty{grid-column:1/-1;background:var(--card);border-radius:var(--radius-lg);padding:34px 16px}
 
-  /* ---- 订单详情：左边订单明细/验货/跟单，右边生产明细，不再全部纵向堆叠 ---- */
+  /* 订单详情：左订单/验货/跟单，右生产明细 */
   .page[data-view="detail"]{display:grid;grid-template-columns:minmax(0,1.02fr) minmax(0,1fr);
     column-gap:24px;align-items:start}
   .page[data-view="detail"] > .g-head{grid-column:1 / -1}
@@ -672,34 +734,27 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   .page[data-view="detail"] > .g-prod{grid-column:2;grid-row:2 / span 3}
   .page[data-view="detail"] > .g-del{grid-column:1 / -1;grid-row:5}
 
-  /* ---- 管理后台：12 栅格重新组织，按内容体量给每块分配宽度 ----
-   * 第一行 员工账号(宽) + 新增员工；第二行 数据导出/职位管理/季节管理 三块轻量内容并排；
-   * 第三行 自定义字段(内部再左右分栏) + 工厂下拉选项。
-   * grid-column 只在 grid 容器里生效，窄屏不是 grid，所以手机端仍是原来的纵向堆叠。 */
+  /* 管理后台：12 栅格按内容体量分配宽度(窄屏不是 grid，仍纵向堆叠) */
   .page[data-view="admin"]{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));
     column-gap:24px;align-items:start}
   .page[data-view="admin"] > .group{grid-column:span 6}
-  /* 分组导航必须横跨整行：不写这条它会被当成一个普通栅格块，压成一列宽，
-     结果只露得出第一个分组按钮，其余三个被挤到看不见的地方 */
+  /* 分组导航横跨整行 */
   .page[data-view="admin"] > .subnav{grid-column:1 / -1}
   .page[data-view="admin"] > .a-users{grid-column:span 7}
   .page[data-view="admin"] > .a-newuser{grid-column:span 5}
 
-  /* ---- 消息通知整页：内容不用铺满超宽屏，读起来更舒服 ---- */
   .page[data-view="notifs"]{max-width:1040px}
 }
 
-/* 1024–1399px：详情页左右分栏后每栏并不宽，栏内表单退回单列，避免字段被挤扁 */
+/* 1024–1399px：详情页栏内表单改单列 */
 @media(min-width:1024px) and (max-width:1399px){
   .page[data-view="detail"] .grid2{grid-template-columns:1fr}
 }
 
-/* ≥1280px 才够宽：管理后台把三块轻量内容并成一行，自定义字段再拆成"字段列表 | 添加表单" */
+/* ≥1280px：管理后台更多块并排 */
 @media(min-width:1280px){
-  /* 「权限」分组：职位在左，权限开关在右 */
   .page[data-view="admin"] > .a-roles{grid-column:span 5}
   .page[data-view="admin"] > .a-perms{grid-column:span 7}
-  /* 「表单配置」分组：自定义字段自己占满一行(它内部还要再左右分栏)，工厂和季节共用第二行 */
   .page[data-view="admin"] > .a-fields{grid-column:1 / -1}
   .page[data-view="admin"] > .a-factories{grid-column:span 7}
   .page[data-view="admin"] > .a-seasons{grid-column:span 5}

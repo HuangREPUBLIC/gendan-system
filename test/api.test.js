@@ -303,6 +303,15 @@ async function call(method, path, token, body) {
   ok((await call("POST", "/notifications/read-all", wT)).status === 200, "标记全部已读");
   ok(await unreadOf(wT) === 0, "全部已读后未读数归零");
   ok((await call("GET", "/notifications", null)).status === 401, "未登录不能读通知列表");
+  // 删除通知：只能删自己的；清空已读只动自己那份，别人的通知不受影响
+  const wList = await listOf(wT), sCount = (await listOf(sT)).length;
+  ok((await call("DELETE", `/notifications/${wList[0].id}`, sT)).status === 403, "不能删除别人的通知");
+  ok((await call("DELETE", `/notifications/${wList[0].id}`, wT)).status === 200, "删除自己的一条通知");
+  ok(!(await listOf(wT)).some(n => n.id === wList[0].id), "删掉的通知不再出现在列表里");
+  ok((await call("DELETE", "/notifications/xxx-not-exist", wT)).status === 404, "删除不存在的通知返回404");
+  ok((await call("DELETE", "/notifications", wT)).status === 400, "不带 read=1 不会误删全部通知");
+  ok((await call("DELETE", "/notifications?read=1", wT)).status === 200 && (await listOf(wT)).length === 0, "清空已读通知");
+  ok((await listOf(sT)).length === sCount, "清空自己的已读通知不影响别人");
 
   // ---- 职位权限可配置：管理员在后台逐项开关，不用改代码 ----
   // 业务员默认不能在「二、生产明细」打卡
@@ -349,13 +358,16 @@ async function call(method, path, token, body) {
     "不能退订别人的设备");
   const off = await call("POST", "/push/unsubscribe", wT, { endpoint: "https://push.example/aaa" });
   ok(off.status === 200 && off.j.devices === 1, "关闭通知后这台设备被移除");
-  // 没开过通知的人点测试，应该明确告诉他没开，而不是假装成功
-  ok((await call("POST", "/push/test", sT)).status === 400, "没开启通知的人发测试通知会被挡下");
-  ok((await call("POST", "/push/test", wT)).status === 200, "开了通知的人能发测试通知");
-  // 推送服务返回 410(订阅失效)时要自动清理——上面那个假 endpoint 根本发不出去，
+  // 「发送测试通知」按钮已去掉，接口也不再存在
+  ok((await call("POST", "/push/test", wT)).status === 404, "测试通知接口已下线");
+  // 推送发不出去时要自动清理——上面那个假 endpoint 根本发不出去。借同事发聊天消息触发真实推送，
   // 连续失败达到上限后这条订阅会被自己清掉，不会永远躺在库里每次都白发一遍
-  await call("POST", "/push/test", wT); await call("POST", "/push/test", wT);
-  ok((await call("POST", "/push/test", wT)).status === 400, "发不出去的订阅会被自动清理掉");
+  for (let k = 0; k < 3; k++) {
+    await call("POST", "/chat/with/" + wang.id, sT, { text: "推送清理测试" + k });
+    await new Promise(r => setTimeout(r, 1200));   // 推送是后台发的，等它失败并记上一次
+  }
+  const resub = await call("POST", "/push/subscribe", wT, { subscription: fakeSub("https://push.example/ccc") });
+  ok(resub.j.devices === 1, "发不出去的订阅会被自动清理掉");
 
   // ---- 意见反馈功能已整个下线：相关接口一律不存在(404)，不能有任何残留入口 ----
   ok((await call("POST", "/feedback", aT, { text: "还能提交吗" })).status === 404, "提交反馈接口已下线");

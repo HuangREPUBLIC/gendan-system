@@ -1,19 +1,13 @@
 "use strict";
-/**
- * 数据层：使用 Node 内置的 node:sqlite（Node 22+），无需编译原生依赖。
- * 存储策略（<100 人规模，简单可靠）：
- *   - users     账号（登录、权限判定需要按手机号查，用独立列）
- *   - settings  键值表，存自定义字段(fields) 与工厂下拉(factories) 的 JSON
- *   - orders    每个订单一行，业务数据(values/logs/subs/inspections/followIssues) 存 JSON
- * 时间统一用毫秒时间戳(Date.now())。
- */
+/* 数据层：Node 内置 node:sqlite。
+ * users 账号 / settings 配置(JSON) / orders 订单(业务数据存 JSON)；时间统一用毫秒时间戳 */
 const { DatabaseSync } = require("node:sqlite");
 const bcrypt = require("bcryptjs");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-// 数据目录可通过环境变量 DATA_DIR 指定（方便部署时挂载到独立磁盘/数据卷）
+// 数据目录可用环境变量 DATA_DIR 指定
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "data");
 const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -64,8 +58,7 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_notif_unread ON notifications(user_id, read_at);
-  -- 系统推送订阅：一台设备(浏览器)一行。endpoint 是推送服务给的地址，天然唯一，
-  -- 用它做主键约束，同一台设备重复开关通知只会覆盖不会攒出重复行。
+  -- 推送订阅：一台设备一行，endpoint 唯一
   CREATE TABLE IF NOT EXISTS push_subscriptions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -82,7 +75,6 @@ db.exec(`
 
 const uid = () => crypto.randomBytes(9).toString("base64url");
 
-/* ---------- settings 帮助函数 ---------- */
 function getSetting(key, fallback) {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
   return row ? JSON.parse(row.value) : fallback;
@@ -92,15 +84,12 @@ function setSetting(key, value) {
     .run(key, JSON.stringify(value));
 }
 
-/* ---------- 升级已有数据库：补齐新版本才有的配置 ----------
- * seedIfEmpty 只在全新库上跑，已经在用的库不会执行，
- * 所以新增的配置项要在这里补，否则老库升级后会缺配置。
- */
+// 老库升级：补齐新版本才有的列和配置（seedIfEmpty 只在空库上跑）
 const DEFAULT_ROLES = [
   { k: "sales", label: "业务员", template: "sales", core: true },
   { k: "follower", label: "下厂员", template: "follower", core: true }
 ];
-// 季节初始列表：当前年份前一年到后两年，SS/FW 各一档（管理员可在后台自行增删）
+// 默认季节：去年到后年，SS/FW 各一个
 function defaultSeasons() {
   let y;
   try { y = +new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", year: "numeric" }).format(new Date()); }
@@ -114,13 +103,11 @@ function columnExists(table, col) {
 }
 
 function ensureDefaults() {
-  // 老库补列：聊天附件
   if (!columnExists("messages", "attachment")) {
     db.exec("ALTER TABLE messages ADD COLUMN attachment TEXT");
     console.log("[db] 已为 messages 表补上 attachment 列");
   }
-  // 老库补列：通知的结构化字段(谁/哪张单/做了什么)，供前端做更精致的展示；
-  // 老通知这几列会是 NULL，前端会退回到纯文本 text 展示
+  // 通知的结构化字段；老通知这几列为 NULL，前端退回纯文本
   if (!columnExists("notifications", "actor_name")) {
     db.exec("ALTER TABLE notifications ADD COLUMN actor_name TEXT");
     db.exec("ALTER TABLE notifications ADD COLUMN order_label TEXT");
@@ -138,7 +125,7 @@ function ensureDefaults() {
     setSetting("factories", factories);
     console.log("[db] 已为现有数据库补齐面料工厂配置");
   }
-  // 老库补齐季节配置：按原先自动生成的年份区间为底，再把已有订单实际用到的季节也保留进去，避免"消失"
+  // 补季节配置时保留订单里已用到的季节
   const seasons = getSetting("seasons", null);
   if (!seasons || !seasons.length) {
     const merged = defaultSeasons();
@@ -147,104 +134,73 @@ function ensureDefaults() {
     setSetting("seasons", merged);
     console.log("[db] 已为现有数据库补齐季节配置");
   }
-  // 老库迁移：产前样进度从「二、生产明细」挪到「一、订单明细」的绣印进度后面。
-  // 产前样是业务员跟客户确认的环节，挂在生产明细下业务员打不了卡，更新不及时。
-  // 只挪位置不动字段本身；打卡记录按 key 存在 orders.data.logs.preSample 里，历史记录不受影响。
-  const preF = getSetting("fields", null);
-  if (preF && (preF.production || []).some(f => f.k === "preSample")) {
-    const moved = preF.production.find(f => f.k === "preSample");
-    preF.production = preF.production.filter(f => f.k !== "preSample");
-    if (!(preF.order || []).some(f => f.k === "preSample")) {
-      const at = preF.order.findIndex(f => f.k === "embProg");
-      preF.order.splice(at >= 0 ? at + 1 : preF.order.length, 0, moved);
-    }
-    setSetting("fields", preF);
-    console.log("[db] 产前样进度已移到「一、订单明细」，业务员可直接打卡");
-  }
-  // 老库把「面料」文本字段换成「面料工厂」下拉（插在绣印工厂前面），不影响其它自定义字段
+  // 字段配置的历次调整：每步幂等，改过才写回
   const fields = getSetting("fields", null);
-  if (fields && fields.order) {
-    const hasOldFabric = fields.order.some(f => f.k === "fabric");
-    const hasFabricFactory = fields.order.some(f => f.k === "fabricFactory");
-    if (hasOldFabric && !hasFabricFactory) {
-      fields.order = fields.order.filter(f => f.k !== "fabric");
-      const embIdx = fields.order.findIndex(f => f.k === "embFactory");
-      const newField = { k: "fabricFactory", label: "面料工厂", type: "factory-fabric" };
-      if (embIdx >= 0) fields.order.splice(embIdx, 0, newField); else fields.order.push(newField);
-      setSetting("fields", fields);
-      console.log("[db] 已将「面料」字段迁移为「面料工厂」下拉");
-    }
-  } else if (!fields) {
-    console.warn("[db] 警告：缺少字段配置");
+  if (!fields || !fields.order) console.warn("[db] 警告：缺少字段配置");
+  else {
+    fields.production = fields.production || [];
+    const idx = k => fields.order.findIndex(f => f.k === k);
+    const has = k => idx(k) >= 0;
+    const steps = [
+      // 产前样进度挪到「一、订单明细」，业务员才能打卡；只挪位置，记录不动
+      ["产前样进度移到「一、订单明细」", () => {
+        const i = fields.production.findIndex(f => f.k === "preSample");
+        if (i < 0) return false;
+        const [moved] = fields.production.splice(i, 1);
+        if (!has("preSample")) { const at = idx("embProg"); fields.order.splice(at >= 0 ? at + 1 : fields.order.length, 0, moved); }
+        return true;
+      }],
+      ["「面料」改为「面料工厂」下拉", () => {
+        if (!has("fabric") || has("fabricFactory")) return false;
+        fields.order = fields.order.filter(f => f.k !== "fabric");
+        const at = idx("embFactory");
+        fields.order.splice(at >= 0 ? at : fields.order.length, 0, { k: "fabricFactory", label: "面料工厂", type: "factory-fabric" });
+        return true;
+      }],
+      ["「生产厂」挪到「一、订单明细」", () => {
+        const i = fields.production.findIndex(f => f.k === "factory");
+        if (i < 0) return false;
+        const [f] = fields.production.splice(i, 1);
+        const fab = fields.order.findIndex(x => x.k === "fabricFactory" || x.k === "fabricFactory1"), emb = idx("embFactory");
+        fields.order.splice(fab >= 0 ? fab : emb >= 0 ? emb : fields.order.length, 0, f);
+        return true;
+      }],
+      ["「生产厂」改名「服装工厂」", () => {
+        const f = fields.order.find(x => x.k === "factory" && x.label === "生产厂");
+        if (!f) return false;
+        f.label = "服装工厂";
+        return true;
+      }],
+      ["「面料工厂」拆成「面料工厂1/2」", () => {
+        const i = idx("fabricFactory");
+        if (i < 0 || has("fabricFactory1")) return false;
+        fields.order.splice(i, 1, { k: "fabricFactory1", label: "面料工厂1", type: "factory-fabric" },
+          { k: "fabricFactory2", label: "面料工厂2", type: "factory-fabric" });
+        return true;
+      }],
+      ["「绣印工厂」拆成「绣花工厂」「印花工厂」", () => {
+        const i = idx("embFactory");
+        if (i < 0 || has("printFactory")) return false;
+        fields.order[i].label = "绣花工厂";
+        fields.order.splice(i + 1, 0, { k: "printFactory", label: "印花工厂", type: "factory-emb" });
+        return true;
+      }],
+      // 工序/人数/预计下车时间改回本厂打卡时填，不再挂在服装工厂旁
+      ["撤掉本厂的工序/人数/预计下车时间字段", () => {
+        const n = fields.order.length;
+        fields.order = fields.order.filter(f => !["mainProcess", "mainWorkers", "mainEstDone"].includes(f.k));
+        return fields.order.length !== n;
+      }]
+    ];
+    let changed = false;
+    steps.forEach(([msg, run]) => { if (run()) { changed = true; console.log("[db] 字段迁移：" + msg); } });
+    if (changed) setSetting("fields", fields);
   }
-  // 老库「生产厂」字段挂在"二、生产明细"下，改成挂到"一、订单明细"，排在面料工厂前面
-  if (fields && fields.production && fields.order) {
-    const idx = fields.production.findIndex(f => f.k === "factory");
-    if (idx >= 0) {
-      const [factoryField] = fields.production.splice(idx, 1);
-      const fabIdx = fields.order.findIndex(f => f.k === "fabricFactory" || f.k === "fabricFactory1");
-      const embIdx = fields.order.findIndex(f => f.k === "embFactory");
-      const insertAt = fabIdx >= 0 ? fabIdx : (embIdx >= 0 ? embIdx : fields.order.length);
-      fields.order.splice(insertAt, 0, factoryField);
-      setSetting("fields", fields);
-      console.log("[db] 已将「生产厂」字段从生产明细挪到订单明细(面料工厂前面)");
-    }
-  }
-  // 老库标签重命名：主厂/生产厂 -> 本厂/服装工厂（只改显示文案，不动字段 key，数据不受影响）
-  if (fields && fields.order) {
-    const factoryF = fields.order.find(f => f.k === "factory" && f.label === "生产厂");
-    if (factoryF) {
-      factoryF.label = "服装工厂";
-      setSetting("fields", fields);
-      console.log("[db] 已将「生产厂」字段标签改名为「服装工厂」");
-    }
-  }
-  // 老库拆分「面料工厂」为「面料工厂1」/「面料工厂2」，两个字段都保留动态多选(chip)UI；
-  // 已有数据整体挪进 fabricFactory1，fabricFactory2 留空，员工可以自己再补填
-  if (fields && fields.order) {
-    const oldIdx = fields.order.findIndex(f => f.k === "fabricFactory");
-    const hasSplit = fields.order.some(f => f.k === "fabricFactory1");
-    if (oldIdx >= 0 && !hasSplit) {
-      fields.order.splice(oldIdx, 1,
-        { k: "fabricFactory1", label: "面料工厂1", type: "factory-fabric" },
-        { k: "fabricFactory2", label: "面料工厂2", type: "factory-fabric" });
-      setSetting("fields", fields);
-      console.log("[db] 已将「面料工厂」拆分为「面料工厂1」「面料工厂2」");
-    }
-  }
-  // 老库拆分「绣印工厂」为「绣花工厂」(沿用 embFactory 这个 key，数据不用搬)/「印花工厂」(新字段 printFactory)
-  if (fields && fields.order) {
-    const embF = fields.order.find(f => f.k === "embFactory");
-    const hasPrintFactory = fields.order.some(f => f.k === "printFactory");
-    if (embF && !hasPrintFactory) {
-      embF.label = "绣花工厂";
-      const embIdx = fields.order.findIndex(f => f.k === "embFactory");
-      fields.order.splice(embIdx + 1, 0, { k: "printFactory", label: "印花工厂", type: "factory-emb" });
-      setSetting("fields", fields);
-      console.log("[db] 已将「绣印工厂」拆分为「绣花工厂」「印花工厂」");
-    }
-  }
-  // 撤回「生产工序/车工人数/预计下车时间」挂在服装工厂旁边的做法——
-  // 改回本厂打卡时才要填这三项(跟加工点不一样，加工点是创建时填，本厂没有单独的创建步骤，还是打卡时填)
-  if (fields && fields.order) {
-    const before = fields.order.length;
-    fields.order = fields.order.filter(f => f.k !== "mainProcess" && f.k !== "mainWorkers" && f.k !== "mainEstDone");
-    if (fields.order.length !== before) {
-      setSetting("fields", fields);
-      console.log("[db] 已撤回「生产工序」「车工人数」「预计下车时间」挂在服装工厂旁边的字段，改回本厂打卡时填");
-    }
-  }
-  // 权限改回按"权限模板"分三档(业务员/下厂员/主管)后，技术主管/业务主管这两个职位要用
-  // "主管"模板(能管所有订单)，不再是业务员模板——一次性迁移，以后新增主管职位直接在
-  // 职位管理里选"主管权限"模板就行。同时清理掉之前版本试过的 fullAccess/permAdd/permEdit/
-  // permDelete 这些废弃字段，避免残留数据造成混淆。
+  // 技术主管/业务主管改用主管模板，清掉旧版废弃的权限字段
   const rolesForPerm = getSetting("roles", []);
   let permChanged = false;
   rolesForPerm.forEach(r => {
-    // 内置的"下厂员"职位(k==="follower")权限模板必须固定是 follower，不能被下面这条
-    // "曾带旧版 permAdd/fullAccess 标记就提升成主管权限"的规则误伤——它之前确实因为
-    // 带过这个旧标记被误升级成了"主管权限"，导致下厂员账号能看到/操作所有订单，
-    // 且订单页"下厂员"选人下拉框(按 template==="follower" 筛选)也因此是空的。
+    // 内置下厂员职位必须保持 follower 模板（曾被旧规则误升为主管）
     const shouldSupervise = r.k !== "follower" &&
       (r.label === "技术主管" || r.label === "业务主管" || r.fullAccess || r.permAdd) && r.template !== "supervisor";
     if (shouldSupervise) { r.template = "supervisor"; permChanged = true; }
@@ -261,21 +217,13 @@ function ensureDefaults() {
   migrateOrdersSchema();
 }
 
-/**
- * 老库的订单迁移到新的「生产进度」「验货问题」数据结构：
- *  - subs 里叫"主厂"且没有 id 的那条 -> 挪进 mainLog，从 subs 里删掉
- *  - 其余 subs 补上 id（老结构没有），变成正式的动态加工点
- *  - 从没打过卡、还叫默认名字（加工厂2/3/4）的占位条目直接清掉，减少噪音
- *  - inspections：去掉 date，item 补 id/problemBy/fixBy/notes
- * 每一步都先判断"是不是已经是新结构"，可以放心重复跑（幂等）。
- */
+// 订单数据迁移到新版生产进度/验货结构，可重复执行
 function migrateOrdersSchema() {
   const rows = db.prepare("SELECT id, data FROM orders").all();
   let migrated = 0;
   rows.forEach(r => {
     const d = JSON.parse(r.data);
     let touched = false;
-    // 「面料工厂」拆分为「面料工厂1」/「面料工厂2」：老数据整体搬进 fabricFactory1
     if (d.values && d.values.fabricFactory !== undefined && d.values.fabricFactory1 === undefined) {
       d.values.fabricFactory1 = d.values.fabricFactory;
       delete d.values.fabricFactory;
@@ -315,7 +263,7 @@ function migrateOrdersSchema() {
   if (migrated) console.log(`[db] 已迁移 ${migrated} 个订单到新版生产进度/验货数据结构`);
 }
 
-/* ---------- 首次运行填充演示数据 ---------- */
+// 首次运行填充演示数据
 function seedIfEmpty() {
   const n = db.prepare("SELECT COUNT(*) c FROM users").get().c;
   if (n > 0) return;
@@ -334,7 +282,6 @@ function seedIfEmpty() {
   const f2 = mkUser("刘敏", "13877778888", "follower");
   const nameOf = { [boss]: "老板", [s1]: "陈晓芳", [s2]: "林志远", [f1]: "王建国", [f2]: "刘敏" };
 
-  // 职位：label 可自由命名，template 决定权限（sales=业务员权限，follower=下厂员权限）
   setSetting("roles", DEFAULT_ROLES);
   setSetting("factories", {
     fabric: ["恒信面料行", "锦源纺织"],
@@ -354,8 +301,6 @@ function seedIfEmpty() {
       { k: "deadline", label: "订单交期", type: "date" },
       { k: "fabricProg", label: "面料进度", type: "log" },
       { k: "embProg", label: "绣印进度", type: "log" },
-      // 产前样进度归「一、订单明细」：产前样是业务员跟客户确认的环节，归业务员管，
-      // 跟面料进度/绣印进度排在一起，业务员能随时打卡更新
       { k: "preSample", label: "产前样进度", type: "log" },
       { k: "factory", label: "服装工厂", type: "factory-prod" },
       { k: "fabricFactory1", label: "面料工厂1", type: "factory-fabric" },
@@ -375,7 +320,7 @@ function seedIfEmpty() {
   const T = (d, h, m) => new Date(2026, 6, d, h, m).getTime();
   const L = (by, d, h, m, text) => ({ id: uid(), by, byName: nameOf[by], t: T(d, h, m), text });
   const emptyLogs = () => ({ fabricProg: [], embProg: [], preSample: [], cutting: [], ironing: [], packing: [] });
-  // insp: 每次验货只由业务员创建"发现问题"，下厂员后续单独填"整改情况"
+  // 验货：业务员填发现问题，下厂员后续填整改情况
   const insp = (problemer, d, h, m, pairs) => ({
     id: uid(), t: T(d, h, m), by: problemer, byName: nameOf[problemer], photos: [],
     items: pairs.map(([fixer, problem, fix]) => ({

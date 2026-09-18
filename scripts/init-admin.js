@@ -1,14 +1,7 @@
 #!/usr/bin/env node
 "use strict";
-/**
- * 正式启用前的初始化：清掉演示数据，只留一个管理员账号。
- *
- *   npm run init-admin -- --name 周彦民 --phone 13920822110
- *   npm run init-admin -- --name 周彦民 --phone 13920822110 --password 自定义密码
- *   npm run init-admin -- --name 周彦民 --phone 13920822110 --keep-orders   # 保留现有订单
- *
- * 默认会清空：全部员工账号、订单、聊天记录、上传的图片。
- */
+/* 正式启用前初始化：清空员工、订单、聊天和上传图片，只留一个管理员。
+ * 用法：npm run init-admin -- --name 姓名 --phone 手机号 [--password 密码] [--keep-orders 保留订单] */
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
@@ -33,7 +26,7 @@ if (!/^\d{6,20}$/.test(phone)) {
   process.exit(1);
 }
 
-seedIfEmpty();      // 保证表结构和配置存在
+seedIfEmpty();
 ensureDefaults();
 
 const counts = {

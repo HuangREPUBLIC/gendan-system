@@ -1,45 +1,39 @@
 "use strict";
-/**
- * 前端：单页应用，数据全部来自服务端（多人多设备看到同一份）。
- * 交互取向：移动优先，底部 Tab 栏 + 顶部标题栏；宽屏时 Tab 栏自动移到顶部。
- * 权限在服务端强制校验，这里只负责隐藏没权限的入口。
- */
+// 前端单页应用：数据都来自服务端；权限以服务端为准，这里只隐藏没权限的入口
 
-/* ================= 状态 ================= */
+// ================= 状态 =================
 let state = {
   token: localStorage.getItem("daka_token") || null,
   me: null, users: [], fields: { order: [], production: [] },
   factories: { emb: [], prod: [], proc: [] }, orders: [], roles: [], seasons: [],
   chat: { contacts: [], activeId: null, contact: null, messages: [], draft: "", att: null },
   unread: { total: 0, byUser: {} },
-  // 应用内通知：订单被同事改动时的提醒。list 为 null 表示还没加载过，open 是桌面端铃铛下拉的开合
+  // list 为 null 表示还没加载；open 是桌面端铃铛下拉
   notifs: { list: null, unread: 0, open: false },
   myLogs: null
 };
 let route = { v: "orders", id: null };
 let editingBasic = false, editingFollower = false, importPreview = null, importRaw = "";
-let showWelcome = false;   // 登录成功后短暂展示的欢迎界面（logo/公司名称/跟单系统）
-const expandedLogGroups = new Set();   // 打卡记录里手动点开"展开全部"的订单(orderId)
-// ship/recent 由桌面端概览卡片点出来（手机端没有那些卡片，这两项始终保持默认值）
+let showWelcome = false;  // 登录后短暂展示的欢迎界面
+const expandedLogGroups = new Set();  // 打卡记录里展开全部的订单
+// ship/recent 来自桌面端概览卡片
 let filt = { season: "", sales: "", follower: "", kw: "", factoryKw: "", ship: "", recent: false };
-let adminUserFilt = { kw: "", page: 1 };   // 管理后台「员工账号」表的搜索/分页
-let adminTab = "people";                   // 管理页当前分组：人员/权限/表单配置/数据
+let adminUserFilt = { kw: "", page: 1 };
+let adminTab = "people";
 const ADMIN_USERS_PAGE_SIZE = 10;
 let modalState = null;
-let deferredInstall = null;   // 安卓/桌面 Chrome 的原生安装事件
-// 是否已经是「装到主屏后打开」的状态
-// 是不是手机/平板（触屏移动设备）——电脑上不显示"安装到手机"
+let deferredInstall = null;  // 安卓/桌面 Chrome 的安装事件
+// 手机/平板才提示「安装到手机」
 const isMobileDevice = () => /iPhone|iPad|iPod|Android|Mobile|HarmonyOS/i.test(navigator.userAgent || "")
   || (navigator.maxTouchPoints > 1 && window.matchMedia && window.matchMedia("(pointer:coarse)").matches);
 const isStandalone = () => (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)
   || window.navigator.standalone === true;
 const isIOSDevice = () => /iPhone|iPad|iPod/i.test(navigator.userAgent || "")
   || (/Mac/i.test(navigator.userAgent || "") && navigator.maxTouchPoints > 1);
-// 系统推送（App 没打开也能弹通知）的当前状态，进"我的"页时刷新
-// supported=false 的典型情况：微信内置浏览器、iOS 上还没"添加到主屏幕"
+// 系统推送状态；微信内置浏览器、未添加到主屏的 iOS 不支持
 let pushState = { supported: false, permission: "default", on: false, devices: 0, checked: false };
 const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
-// 浏览器要的是 Uint8Array 格式的公钥，服务端给的是 base64url 字符串，这里转一下
+// base64url 公钥 -> Uint8Array
 function urlB64ToUint8Array(base64) {
   const pad = "=".repeat((4 - base64.length % 4) % 4);
   const raw = atob((base64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
@@ -58,31 +52,48 @@ async function refreshPushState(rerender) {
   if (rerender) render();
 }
 
-/* ================= 工具 ================= */
+// ================= 工具 =================
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-// 时间：今年省略年份 ——「7月20日 17:51」；跨年「2025年7月20日 17:51」
+// 今年省略年份：7月20日 17:51
 function fmtT(t) {
   const d = new Date(t), p = n => String(n).padStart(2, "0");
   const y = d.getFullYear() === new Date().getFullYear() ? "" : d.getFullYear() + "年";
   return `${y}${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
-// 今天，按本地时区取（toISOString 是 UTC，中国上午 8 点前会算成前一天）
+// 本地时区的今天(toISOString 是 UTC)
 function todayStr() {
   const d = new Date(), p = n => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
-// 导入表格里的日期五花八门(2026/8/15、2026年8月15日…)，统一成 input[type=date] 认得的 yyyy-mm-dd，
-// 不然日期字段的值会在导入预览里显示成空白，确认导入时又被当作"没填"悄悄丢掉
+// 导入的各种日期写法统一成 2026-08-15；认不出返回 null
 function normalizeImportDate(s) {
   s = String(s || "").trim();
-  if (!s || /^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const m = s.match(/^(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})日?$/);
-  if (m) return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
-  return s;
+  if (!s) return "";
+  const iso = (y, m, d) => {
+    y = +y; m = +m; d = +d; if (y < 100) y += 2000;
+    const dt = new Date(y, m - 1, d);
+    return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d
+      ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null;
+  };
+  let m;
+  if ((m = s.match(/^(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})日?(\s|T|$)/))) return iso(m[1], m[2], m[3]);  // 2026-8-15、2026/8/15、2026年8月15日、2026.8.15
+  if ((m = s.match(/^(\d{4})(\d{2})(\d{2})$/))) return iso(m[1], m[2], m[3]);
+  if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/))) return iso(m[3], m[1], m[2]);  // Excel 英文格式 8/15/26
+  if ((m = s.match(/^(\d{1,2})月(\d{1,2})日?$/))) return iso(new Date().getFullYear(), m[1], m[2]);  // 按今年
+  if (/^\d{5}$/.test(s) && +s > 30000 && +s < 80000) {  // Excel 日期序号
+    const dt = new Date(Date.UTC(1899, 11, 30) + (+s) * 86400000);
+    return iso(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+  }
+  return null;
 }
-// 日期字符串 2026-08-15 -> 2026年8月15日
+// 表头比对前清洗：去空格/星号/冒号和末尾括号备注，不分大小写
+function normHeader(h) {
+  return String(h == null ? "" : h).replace(/^\uFEFF/, "").replace(/[\s*＊:：]/g, "").replace(/[（(][^（()）]*[）)]$/, "").toLowerCase();
+}
+let importUnknownCols = [];  // 没认出的列，预览时提示
+// 2026-08-15 -> 2026年8月15日
 function fmtDate(v) {
   if (!v) return "";
   const m = String(v).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
@@ -94,6 +105,19 @@ function fmtSize(n) {
   if (n < 1024) return n + " B";
   if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
   return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+// App 内置浏览器大多不支持下载文件
+function inAppBrowser() { return /MicroMessenger|wxwork|DingTalk|\bQQ\/|Lark|Feishu|AlipayClient|Weibo/i.test(navigator.userAgent || ""); }
+const isIosStandalone = () => isIOSDevice() && isStandalone();
+const canOfferInstall = () => isMobileDevice() && !isStandalone();
+// clipboard 接口要求 https，否则退回 execCommand
+async function copyText(text) {
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; } } catch (e) { }
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
+  document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+  let ok = false; try { ok = document.execCommand("copy"); } catch (e) { }
+  ta.remove(); return ok;
 }
 function toast(s, sticky) {
   const m = $("msg"); m.textContent = s; m.classList.add("show");
@@ -120,7 +144,7 @@ const APP_LOGO = `
     <path d="M262 174 H334 M262 256 H334 M262 338 H296" stroke="#2F5FA8" stroke-width="26" stroke-linecap="round"/>
   </svg>`;
 
-/* ================= API ================= */
+// ================= API =================
 async function api(method, path, body) {
   const headers = {};
   if (state.token) headers.Authorization = "Bearer " + state.token;
@@ -139,8 +163,7 @@ async function refresh() {
   state.seasons = b.seasons || [];
   saveStateCache();
 }
-// 本地缓存上一次的订单/用户/字段等数据：下次打开先用它瞬间显示，不用干等网络，
-// 后台悄悄刷新到最新——跟账号 token 绑定，换账号/退出登录就失效，不会串到别人的数据
+// 本地缓存上次的数据，打开时先显示再后台刷新；跟 token 绑定
 const STATE_CACHE_KEY = "daka_cache_v1";
 function saveStateCache() {
   try {
@@ -158,75 +181,65 @@ function loadStateCache() {
     state.factories = c.factories; state.orders = c.orders; state.roles = c.roles; state.seasons = c.seasons;
   } catch (e) { /* 缓存损坏就忽略，走正常的网络加载 */ }
 }
+function rerenderKeepFocus(inputId, redraw) {
+  clearTimeout(rerenderKeepFocus.t);
+  rerenderKeepFocus.t = setTimeout(() => {
+    (redraw || render)();
+    const inp = $(inputId);
+    if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  }, 300);
+}
+function confirmDanger(title, body, onOk, okText) {
+  modal({ title, body, danger: true, okText: okText || "确认删除", onOk });
+}
+function askText(opts, onText) {
+  modal(Object.assign({ input: "text" }, opts, { onOk: v => { const t = (v || "").trim(); if (t) onText(t); } }));
+}
 async function run(fn, okMsg) {
   try { await fn(); await refresh(); render(); if (okMsg) toast(okMsg); }
   catch (e) { toast((e && e.error) || "操作失败"); }
 }
 
-/* ================= 权限（仅用于显示控制） ================= */
-// 按职位的权限模板：管理员什么都能做；主管(技术主管/业务主管等)能管所有订单；
-// 业务员只能管自己创建/负责的订单；下厂员只能管自己被指派负责的订单。
-// 发货日期一旦填写，只锁定这个字段本身(除管理员外谁都不能再改)，订单其它内容不受影响。
+// ================= 权限（只控制显示，规则同服务端 auth.js） =================
 function isSupervisor() { const u = me(); return !!u && u.template === "supervisor"; }
-function isOwnBySales(o) {
-  const u = me(); if (!u || !o) return false;
-  return o.values.sales === u.id || o.createdBy === u.id;
-}
-function isOwnByFollower(o) {
-  const u = me(); if (!u || !o) return false;
-  return o.values.follower === u.id;
-}
 function shipLocked(o) { return !!(o && o.values && o.values.shipDate); }
-/* 职位能力：跟服务端 auth.js 的 permsOf 一套规则，这里只负责隐藏按钮，真正的拦截在服务端。
-   template(身份)决定"自己的单"怎么算，perms(能力)决定能干什么——管理员在「管理 → 权限」里改。
-   职位没配过 perms 就按模板默认，跟以前行为一致。 */
 const TEMPLATE_PERMS = {
   sales:      { scope: "own", editOrder: true,  editProd: false, logOrder: true,  logProd: false, createOrder: true, inspect: true },
   follower:   { scope: "own", editOrder: false, editProd: true,  logOrder: false, logProd: true,  createOrder: true, inspect: true },
   supervisor: { scope: "all", editOrder: true,  editProd: true,  logOrder: true,  logProd: true,  createOrder: true, inspect: true }
 };
 const PERM_KEYS = ["editOrder", "editProd", "logOrder", "logProd", "createOrder", "inspect"];
-const ALL_PERMS = { scope: "all", editOrder: true, editProd: true, logOrder: true, logProd: true, createOrder: true, inspect: true };
-function myPerms() {
-  const u = me(); if (!u) return null;
-  if (isAdmin()) return ALL_PERMS;
-  const base = TEMPLATE_PERMS[u.template] || TEMPLATE_PERMS.follower;
-  const saved = (state.roles.find(r => r.k === u.role) || {}).perms;
+function mergePerms(template, saved) {
+  const base = TEMPLATE_PERMS[template] || TEMPLATE_PERMS.follower;
   if (!saved) return base;
   const out = Object.assign({}, base);
   if (saved.scope === "all" || saved.scope === "own") out.scope = saved.scope;
   PERM_KEYS.forEach(k => { if (typeof saved[k] === "boolean") out[k] = saved[k]; });
   return out;
 }
-// 是不是"这单的相关人员"：scope=all 对所有单都算；scope=own 按 template 决定归属关系
+function myPerms() {
+  const u = me(); if (!u) return null;
+  if (isAdmin()) return TEMPLATE_PERMS.supervisor;
+  return mergePerms(u.template, (state.roles.find(r => r.k === u.role) || {}).perms);
+}
+const permsOfRole = r => mergePerms(r.template, r.perms);
 function isRelated(o) {
   const u = me(); if (!u || !o) return false;
-  const p = myPerms();
-  if (p.scope === "all") return true;
-  if (u.template === "sales") return isOwnBySales(o);
-  if (u.template === "follower") return isOwnByFollower(o);
+  if (myPerms().scope === "all") return true;
+  if (u.template === "sales") return o.values.sales === u.id || o.createdBy === u.id;
+  if (u.template === "follower") return o.values.follower === u.id;
   return false;
 }
-function canEditSection(o, section) {
-  const u = me(); if (!u) return false;
-  if (isAdmin()) return true;
+function sectionPerm(o, section, orderKey, prodKey) {
   if (!isRelated(o)) return false;
   const p = myPerms();
-  if (section === "order") return !!p.editOrder;
-  if (section === "production") return !!p.editProd;
-  return !!(p.editOrder || p.editProd);
+  if (section === "order") return !!p[orderKey];
+  if (section === "production") return !!p[prodKey];
+  return !!(p[orderKey] || p[prodKey]);
 }
-function canEditBasic(o) { return canEditSection(o, "order") || canEditSection(o, "production"); }
-// 打卡跟改字段是两个独立开关：可以只给打卡权、不给改字段权
-function canAddLog(o, section) {
-  const u = me(); if (!u) return false;
-  if (isAdmin()) return true;
-  if (!isRelated(o)) return false;
-  const p = myPerms();
-  if (section === "order") return !!p.logOrder;
-  if (section === "production") return !!p.logProd;
-  return !!(p.logOrder || p.logProd);
-}
+const canEditSection = (o, section) => sectionPerm(o, section, "editOrder", "editProd");
+const canEditBasic = o => canEditSection(o);
+const canAddLog = (o, section) => sectionPerm(o, section, "logOrder", "logProd");
 function canTouchEntry(o, e, section) {
   const u = me(); if (!u) return false;
   if (isAdmin()) return true;
@@ -234,18 +247,16 @@ function canTouchEntry(o, e, section) {
   if (e && e.by === u.id) return true;
   return canEditSection(o, section);
 }
-// 发货日期字段本身能不能改：填过之后除管理员外谁都不能再改；没填过时只要是本单相关人员
-// (业务员/下厂员/主管/管理员)都能设置，不分一二板块
-// 发货日期一旦填写就锁定，只有管理员/主管能再改(含改成新日期、清空撤销)；业务员/下厂员不行
+// 发货日期填写后只有管理员/主管能改
 function canEditShipDate(o) {
   if (isAdmin() || isSupervisor()) return true;
   if (shipLocked(o)) return false;
   return canEditBasic(o);
 }
-const canWriteInspProblem = (o) => isAdmin() || (isRelated(o) && !!(myPerms() || {}).inspect);
+const canWriteInspProblem = o => isRelated(o) && !!myPerms().inspect;
 const canWriteInspFix = canWriteInspProblem;
 
-/* ================= 字段与下拉 ================= */
+// ================= 字段与下拉 =================
 function optionsFor(f) {
   if (f.type === "user-sales") return state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]);
   if (f.type === "user-follower") return state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]);
@@ -264,13 +275,15 @@ function displayVal(o, f) {
   return v;
 }
 const isMultiFactory = f => f.type === "factory-fabric" || f.type === "factory-emb";
+const allFieldDefs = () => [...state.fields.order, ...state.fields.production];
+const scalarFields = s => state.fields[s].filter(f => f.type !== "log");
 function fieldInput(f, val, prefix) {
   prefix = prefix || "nf-";
   const id = prefix + f.k;
   if (isMultiFactory(f)) return factoryMultiHtml(f, val, id);
   const opts = optionsFor(f);
   if (opts) {
-    // 工厂类下拉：就算这个值不在管理员定义的列表里(比如导入进来的)，也要保留显示出来，不能悄悄丢掉
+    // 值不在下拉列表里(如导入的)也保留显示
     const isFactory = f.type === "factory-prod";
     const extra = (isFactory && val && !opts.some(([v]) => v === val)) ? [[val, val]] : [];
     return `<select class="in" id="${id}"><option value="">请选择</option>${[...extra, ...opts].map(([v, t]) =>
@@ -278,21 +291,22 @@ function fieldInput(f, val, prefix) {
   }
   if (f.type === "textarea") return `<textarea class="in" id="${id}">${esc(val || "")}</textarea>`;
   if (f.type === "date") return dateFieldHtml(id, val);
-  if (f.type === "number") return `<input class="in" type="number" id="${id}" value="${esc(val || "")}">`;
+  if (f.type === "number") return `<input class="in" type="number" inputmode="decimal" id="${id}" value="${esc(val || "")}">`;
   if (f.type === "image") return photoPicker("img");
-  return `<input class="in" id="${id}" value="${esc(val || "")}">`;
+  // 数量弹数字键盘；货号关掉自动大写和联想
+  const kb = f.k === "qty" ? ` inputmode="numeric" pattern="[0-9,]*"`
+    : f.k === "styleNo" ? ` autocapitalize="characters" autocorrect="off" spellcheck="false"` : "";
+  return `<input class="in" id="${id}" value="${esc(val || "")}" autocomplete="off"${kb}>`;
 }
 const fieldRow = (f, val, prefix) => `<label class="field"><span>${esc(f.label)}</span>${fieldInput(f, val, prefix)}</label>`;
 
-// 面料工厂/绣印工厂：同一款可能要挂多个供应商，用标签+下拉添加，而不是单选
+// 面料/绣花/印花工厂可挂多个供应商
 function factoryMultiHtml(f, val, id) {
   const opts = optionsFor(f) || [];
-  // 值不在管理员定义的列表里(比如老数据、导入进来的)也保留，不悄悄丢掉
   const arr = Array.isArray(val) ? val.slice() : (val ? [val] : []);
   const remaining = opts.filter(([v]) => !arr.includes(v));
   return `<div class="multifactory" data-id="${id}">
-    <div class="multifactory-chips">${arr.length ? arr.map(v => `<span class="tag role">${esc(v)}
-      <a href="javascript:void(0)" onclick="A.removeFactoryChip('${id}','${encodeURIComponent(v)}')" style="margin-left:4px">✕</a></span>`).join("")
+    <div class="multifactory-chips">${arr.length ? arr.map(v => chipHtml(v, `A.removeFactoryChip('${id}','${encodeURIComponent(v)}')`)).join("")
       : `<span class="row-sub">未选择</span>`}</div>
     ${remaining.length ? `<div style="display:flex;gap:8px;margin-top:8px">
       <select class="in" id="${id}--add"><option value="">选择要添加的工厂</option>${remaining.map(([v, t]) =>
@@ -301,8 +315,7 @@ function factoryMultiHtml(f, val, id) {
     <input type="hidden" id="${id}" value='${esc(JSON.stringify(arr))}'></div>`;
 }
 
-// 日期：真正的 input[type=date] 透明地盖满整个按钮区域直接接收点击/触摸(不靠 JS 模拟点击，
-// 部分手机浏览器不支持 showPicker() 会导致点了没反应)，下面露出显示「2026年8月15日」的中文按钮
+// 原生日期框透明盖在中文按钮上直接接收点击(部分手机不支持 showPicker)
 function dateFieldHtml(id, val, extraOnChange) {
   return `<div class="datefield">
     <button type="button" class="in date-btn ${val ? "" : "empty"}" id="${id}--label" tabindex="-1"
@@ -310,28 +323,29 @@ function dateFieldHtml(id, val, extraOnChange) {
     <input type="date" id="${id}" class="date-native" value="${esc(val || "")}" autocomplete="off"
       onchange="${extraOnChange ? extraOnChange + ";" : ""}A.syncDateLabel('${id}')" onclick="A.openDate(this)" onfocus="A.openDate(this)"></div>`;
 }
-// 文件选择：隐藏原生控件（它显示英文 Choose File），用中文按钮代替
-function fileFieldHtml(id, accept, onchange, pickText) {
-  return `<div class="filefield">
-    <input type="file" id="${id}" class="file-native" accept="${accept}" onchange="${onchange}">
-    <button type="button" class="in file-btn" onclick="document.getElementById('${id}').click()">
-      <span class="file-name" id="${id}--name">未选择文件</span>
-      <span class="file-pick">${esc(pickText || "选择文件")}</span></button></div>`;
-}
 
-// 季节列表由管理员在后台维护(state.seasons)；订单里实际用到、但已被管理员删掉的季节仍要能显示，不能让老订单"消失"
+// 订单里用到但已被删掉的季节仍要显示
 function seasonOptions(cur) {
   const list = (state.seasons || []).slice();
   state.orders.forEach(o => { if (o.season && !list.includes(o.season)) list.unshift(o.season); });
   if (cur && !list.includes(cur)) list.unshift(cur);
   return list;
 }
+// 季节四色轮换：按后台季节顺序取色；已删的季节按名字算固定颜色
+function seasonTone(s) {
+  let i = (state.seasons || []).indexOf(s);
+  if (i < 0) i = [...String(s || "")].reduce((h, c) => h + c.charCodeAt(0), 0);
+  return "s" + (i % 4);
+}
+function seasonTag(s, style) {
+  return `<span class="tag season ${seasonTone(s)}"${style ? ` style="${style}"` : ""}>${esc(s)}</span>`;
+}
 function seasonSelectHtml(cur, prefix) {
   return `<select class="in" id="${(prefix || "nf-")}season"><option value="">请选择季节</option>${
     seasonOptions(cur).map(s => `<option ${s === cur ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`;
 }
 
-/* ================= 弹窗 ================= */
+// ================= 弹窗 =================
 function modal(opts) { modalState = opts; renderModal(); }
 function renderModal() {
   const mask = $("mask");
@@ -351,53 +365,171 @@ function renderModal() {
   mask.classList.add("show");
 }
 
-/* ================= 照片：压缩 / 多图上传 / 选择器 / 大图查看 ================= */
-let photoDraft = {};          // { 上下文key: [url,...] } 表单里正在编辑的照片
-let lightbox = null;          // 大图查看器状态
+// ================= 照片 =================
+let photoDraft = {};  // { ctx: [url] } 表单里正在编辑的照片
+let lightbox = null;
 
 function normalizePhotos(v) {
   if (Array.isArray(v)) return v.filter(x => typeof x === "string" && x);
   if (typeof v === "string" && v) return [v];
   return [];
 }
-// 上传前压缩：长边 ≤1600，JPEG 0.82，把手机几 MB 的照片压到几百 KB
-function compressImage(file) {
-  return new Promise((resolve) => {
-    if (!file || !/^image\//.test(file.type)) return resolve(null);
-    const rd = new FileReader();
-    rd.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const max = 2000, scale = Math.min(1, max / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
-        const c = document.createElement("canvas"); c.width = w; c.height = h;
-        c.getContext("2d").drawImage(img, 0, 0, w, h);
-        c.toBlob(b => resolve(b || file), "image/jpeg", 0.85);
-      };
-      img.onerror = () => resolve(file);
-      img.src = rd.result;
+const PHOTO_MAX_EDGE = 2000;
+const PHOTO_MAX_BYTES = 8 * 1024 * 1024;  // 同服务端单张上限
+const PHOTO_MAX_PER_PICKER = 30;
+function isHeic(file) { return /hei[cf]/i.test(file.type || "") || /\.hei[cf]$/i.test(file.name || ""); }
+// 部分安卓选出的文件 type 为空，再看扩展名
+function looksLikeImage(file) {
+  return !!file && (/^image\//.test(file.type || "") || /\.(jpe?g|png|gif|webp|hei[cf]|bmp)$/i.test(file.name || ""));
+}
+// 优先 createImageBitmap(按 EXIF 摆正)，不支持再用 <img>；不读成 base64，避免低端机内存爆
+async function decodeImage(file) {
+  if (window.createImageBitmap) {
+    try { return await createImageBitmap(file, { imageOrientation: "from-image" }); } catch (e) { /* 走下面的兜底 */ }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.decoding = "async";
+    await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; img.src = url; });
+    return img;
+  } finally { setTimeout(() => URL.revokeObjectURL(url), 0); }
+}
+// 压缩成 JPEG：顺带去掉 GPS 等 EXIF；透明 PNG 铺白底；用完清空画布(iOS 画布内存有上限)。GIF 保留原图
+async function compressImage(file) {
+  if (!looksLikeImage(file)) throw { error: "只能上传图片", noRetry: true };
+  if (/gif$/i.test(file.type || "")) {
+    if (file.size > PHOTO_MAX_BYTES) throw { error: "GIF 动图不能超过 8MB", noRetry: true };
+    return file;
+  }
+  let src;
+  try { src = await decodeImage(file); }
+  catch (e) {
+    throw { noRetry: true, error: isHeic(file)
+      ? "这张是 HEIC 格式照片，当前浏览器打不开。请把相机的照片格式改成「兼容性最佳 / JPG」，或截图后再传"
+      : "这张图片打不开，可能已损坏或格式不支持" };
+  }
+  const w0 = src.width, h0 = src.height;
+  const scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(w0, h0));
+  const w = Math.max(1, Math.round(w0 * scale)), h = Math.max(1, Math.round(h0 * scale));
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, w, h);
+  g.imageSmoothingQuality = "high";
+  g.drawImage(src, 0, 0, w, h);
+  if (src.close) src.close();
+  const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.85));
+  c.width = c.height = 0;
+  if (blob) return blob;
+  if (file.size <= PHOTO_MAX_BYTES && !isHeic(file)) return file;  // 个别浏览器 toBlob 失败时原图直传
+  throw { error: "图片处理失败，请换一张试试", noRetry: true };
+}
+function xhrUpload(url, fd, { timeout, onProgress, holder } = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    if (holder) holder.xhr = xhr;
+    xhr.open("POST", url);
+    xhr.setRequestHeader("Authorization", "Bearer " + state.token);
+    if (timeout) xhr.timeout = timeout;
+    if (xhr.upload && onProgress) xhr.upload.onprogress = e => onProgress(e.lengthComputable && e.total ? e.loaded / e.total : null);
+    xhr.onload = () => {
+      let j = null; try { j = JSON.parse(xhr.responseText); } catch (e) { }
+      if (xhr.status >= 200 && xhr.status < 300 && j) return resolve(j);
+      reject({ error: (j && j.error) || `上传失败(${xhr.status})`, fatal: xhr.status >= 400 && xhr.status < 500 });
     };
-    rd.onerror = () => resolve(file);
-    rd.readAsDataURL(file);
+    xhr.onerror = () => reject({ error: "网络出错，上传失败" });
+    xhr.ontimeout = () => reject({ error: "上传超时，网络太慢" });
+    xhr.onabort = () => reject({ error: "已取消", aborted: true });
+    xhr.send(fd);
   });
 }
-async function uploadOnePhoto(file) {
-  const blob = await compressImage(file);
-  if (!blob) return null;
-  const fd = new FormData(); fd.append("image", blob, "photo.jpg");
-  // fetch 本身不会超时，网络卡住时一次请求可能挂很久——加个15秒上限，
-  // 这样失败重试的时候不会跟着挂两倍的时间，网络正常时完全不影响(照常很快成功)
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 15000);
-  let r;
-  try {
-    r = await fetch("/api/upload", { method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd, signal: ac.signal });
-  } catch (e) {
-    if (e && e.name === "AbortError") throw { error: "上传超时，网络太慢" };
-    throw e;
-  } finally { clearTimeout(timer); }
-  const j = await r.json(); if (!r.ok) throw j;
+async function uploadBlob(blob, onProgress, holder) {
+  const ext = blob.type === "image/gif" ? "gif" : blob.type === "image/png" ? "png" : "jpg";
+  const fd = new FormData(); fd.append("image", blob, "photo." + ext);
+  const j = await xhrUpload("/api/upload", fd, { timeout: 20000 + Math.ceil(blob.size / 102400) * 2000,
+    onProgress: onProgress && (p => { if (p != null) onProgress(p); }), holder });
+  if (!j.url) throw { error: "上传失败" };
   return j.url;
+}
+// 网络错误自动重试一次
+async function uploadWithRetry(blob, onProgress, holder) {
+  let lastErr;
+  for (let i = 0; i < 2; i++) {
+    if (holder && holder.removed) throw { error: "已取消", aborted: true };
+    try { return await uploadBlob(blob, onProgress, holder); }
+    catch (e) { lastErr = e; if (e.fatal || e.aborted) break; }
+  }
+  throw lastErr;
+}
+async function uploadOnePhoto(file) { return uploadWithRetry(await compressImage(file)); }
+
+/* ---------- 上传队列 ----------
+ * 选完先出本地预览和进度条，失败的格子可重试；
+ * 压缩串行(低端机内存)，上传并发 3 张；按选择顺序落位 */
+let photoPending = {};
+const photoPreviewOf = {};  // 刚传完的照片用本地预览显示，不再下载
+let photoSeq = 0, compressChain = Promise.resolve();
+let upActive = 0; const upWaiters = [];
+async function upSlot() { if (upActive < 3) { upActive++; return; } await new Promise(r => upWaiters.push(r)); }
+function upRelease() { const next = upWaiters.shift(); if (next) next(); else upActive--; }
+const clearImportPhotoDrafts = () => Object.keys(photoDraft).forEach(k => { if (/^imp\d+-img$/.test(k)) delete photoDraft[k]; });
+function repaintPicker(ctx) { const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
+function flushPending(ctx) {
+  const pend = photoPending[ctx] || [];
+  photoDraft[ctx] = photoDraft[ctx] || [];
+  while (pend.length && pend[0].status === "done") {
+    const it = pend.shift();
+    if (it.preview) photoPreviewOf[it.url] = it.preview;
+    photoDraft[ctx].push(it.url);
+  }
+  if (!pend.length) delete photoPending[ctx];
+  repaintPicker(ctx);
+}
+async function processPhoto(ctx, it) {
+  try {
+    it.status = "work"; repaintPicker(ctx);
+    if (!it.blob) {
+      const job = compressChain.then(() => it.removed ? null : compressImage(it.file));
+      compressChain = job.catch(() => { });
+      it.blob = await job;
+      if (it.removed || !it.blob) return;
+      it.file = null;
+      it.preview = URL.createObjectURL(it.blob);
+      repaintPicker(ctx);
+    }
+    await upSlot();
+    try {
+      if (it.removed) return;
+      it.status = "up"; it.pct = 0; repaintPicker(ctx);
+      it.url = await uploadWithRetry(it.blob, p => {
+        it.pct = p;
+        const bar = document.querySelector(`#pp-${it.id} .ph-bar i`);
+        if (bar) bar.style.width = Math.round(p * 100) + "%";
+      }, it);
+    } finally { upRelease(); }
+    it.status = "done";
+  } catch (e) {
+    if (it.removed) return;
+    it.status = "err"; it.err = (e && e.error) || "上传失败"; it.noRetry = !!(e && e.noRetry);
+    toast(it.err);
+  }
+  if (!it.removed) flushPending(ctx);
+}
+// 照片没传完或有失败时不许保存
+function photosBusyMsg(test) {
+  const match = k => typeof test === "string" ? k === test : test.test(k);
+  const items = Object.keys(photoPending).filter(match).flatMap(k => photoPending[k]);
+  if (items.some(it => it.status === "err")) return "有照片上传失败，请点「重试」或删掉后再保存";
+  if (items.length) return "照片还在上传，请稍等几秒再保存";
+  return "";
+}
+const photosBlocked = test => { const m = photosBusyMsg(test); if (m) toast(m); return !!m; };
+function resetPhotoPending() {
+  Object.values(photoPending).flat().forEach(it => { it.removed = true; if (it.xhr) it.xhr.abort(); });
+  photoPending = {};
+}
+async function ensureXlsx(msg) {
+  if (!window.XLSX) { toast(msg, true); await loadScriptOnce("/xlsx.mini.min.js"); }
 }
 function loadScriptOnce(src) {
   return new Promise((resolve, reject) => {
@@ -407,13 +539,11 @@ function loadScriptOnce(src) {
     document.head.appendChild(s);
   });
 }
-// 浏览器本地读 zip 包里的几个指定文件(只读，不装额外的库)：
-// 只支持 STORED(不压缩)和 DEFLATE(用浏览器原生 DecompressionStream 解压)，
-// 遇到不支持的情况直接跳过该文件，让调用方决定要不要退回服务端解析，绝不会让用户没感知地拿到错误结果
+// 浏览器本地读 zip 里的指定文件，只支持 STORED/DEFLATE，不支持的跳过
 async function zipReadEntries(buf, wantNames) {
   const dv = new DataView(buf), bytes = new Uint8Array(buf);
   let eocd = -1;
-  const back = Math.min(bytes.length, 65557); // EOCD固定22字节 + 最长65535字节注释
+  const back = Math.min(bytes.length, 65557);  // EOCD 22 字节 + 最长 65535 字节注释
   for (let i = bytes.length - 22; i >= bytes.length - back && i >= 0; i--) {
     if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
   }
@@ -449,12 +579,10 @@ async function zipReadEntries(buf, wantNames) {
       result[name] = new Uint8Array(await new Response(stream).arrayBuffer());
       continue;
     }
-    // 其它压缩方式(极少见)不支持，跳过这个文件
   }
   return result;
 }
-// 从 xlsx 里抠出直接贴的图片(比如款式图)，按锚定的行号(0-based，跟表头一起算)配对——
-// 浏览器本地版，逻辑跟服务端 extractEmbeddedImages 完全对应，解析失败就返回已抠到的部分，不影响正常的表格文字导入
+// 从 xlsx 抠出贴在表格里的图片，按锚定行号配对(同服务端 extractEmbeddedImages)，失败返回已抠到的
 async function extractEmbeddedImagesClient(buf) {
   const images = {};
   try {
@@ -497,77 +625,355 @@ async function extractEmbeddedImagesClient(buf) {
   } catch (e) { /* 抠图失败就返回已抠到的部分(可能是空)，不影响正常的表格文字导入 */ }
   return images;
 }
-// 缩略图（editable 时带删除叉）
+// 缩略图；可编辑时带删除叉，款式图第一张标「封面」
 function photoThumbs(urls, editable, ctx) {
+  const gallery = esc(JSON.stringify(urls));
+  const cover = editable && urls.length > 1 && /(^|-)img$/.test(ctx || "");
   return urls.map((u, i) => `<div class="ph-thumb">
-    <img src="${esc(u)}" data-gallery='${JSON.stringify(urls)}' data-i="${i}" onclick="A.lightboxFromEl(this)">
-    ${editable ? `<span class="ph-x" onclick="A.removeDraftPhoto('${ctx}',${i})">✕</span>` : ""}</div>`).join("");
+    <img src="${esc(photoPreviewOf[u] || u)}" alt="照片 ${i + 1}" loading="lazy" decoding="async"
+      data-gallery="${gallery}" data-i="${i}" onclick="A.lightboxFromEl(this)">
+    ${cover && i === 0 ? `<span class="ph-cover">封面</span>` : ""}
+    ${editable ? `<button type="button" class="ph-x" aria-label="删除第 ${i + 1} 张照片" onclick="A.removeDraftPhoto('${ctx}',${i})">✕</button>` : ""}</div>`).join("");
 }
-// 拍照和相册拆成两个独立入口：部分手机(尤其华为)系统选择器在 <input multiple> 上会隐藏"拍照"选项
-// (一次拍照只能出一张图，跟多选语义冲突)，只拆开两个按钮才能保证两条路都能用
+function pendingTile(ctx, it) {
+  const err = it.status === "err";
+  return `<div class="ph-thumb ph-pending${err ? " is-err" : ""}" id="pp-${it.id}">
+    ${it.preview ? `<img src="${it.preview}" alt="">` : `<span class="ph-skel"></span>`}
+    ${err ? (it.noRetry ? `<span class="ph-errmsg" title="${esc(it.err)}">无法上传</span>`
+          : `<button type="button" class="ph-retry" title="${esc(it.err)}" onclick="A.retryPhoto('${ctx}',${it.id})">${PHOTO_ICONS.retry}<span>重试</span></button>`)
+      : `<span class="ph-bar" aria-label="上传中"><i style="width:${Math.round((it.pct || 0) * 100)}%"></i></span>`}
+    <button type="button" class="ph-x" aria-label="取消这张照片" onclick="A.cancelPhoto('${ctx}',${it.id})">✕</button></div>`;
+}
+const PHOTO_ICONS = {
+  camera: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.2-1.8A1.5 1.5 0 0 1 10 4.5h4a1.5 1.5 0 0 1 1.3.7L16.5 7h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="12.5" r="3.3"/></svg>`,
+  album: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 15.5 16 11l-7.5 8.5"/></svg>`,
+  retry: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>`,
+  save: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>`
+};
+// 拍照和相册分成两个入口：部分手机(华为)在 multiple 时会隐藏拍照；图标用 SVG，emoji 在安卓上不统一
 function pickerInner(ctx) {
-  const list = photoDraft[ctx] || [];
-  return photoThumbs(list, true, ctx) +
-    `<label class="ph-add"><input type="file" accept="image/*" capture="environment" style="display:none" onchange="A.addDraftPhotos('${ctx}',this)">
-      <span class="ph-plus">📷</span><span>拍照</span></label>` +
-    `<label class="ph-add"><input type="file" accept="image/*" multiple style="display:none" onchange="A.addDraftPhotos('${ctx}',this)">
-      <span class="ph-plus">＋</span><span>相册</span></label>`;
+  const list = photoDraft[ctx] || [], pend = photoPending[ctx] || [];
+  const full = list.length + pend.length >= PHOTO_MAX_PER_PICKER;
+  return photoThumbs(list, true, ctx) + pend.map(it => pendingTile(ctx, it)).join("") + (full ? "" :
+    `<label class="ph-add"><input type="file" accept="image/*" capture="environment" hidden onchange="A.addDraftPhotos('${ctx}',this)">
+      <span class="ph-ic">${PHOTO_ICONS.camera}</span><span>拍照</span></label>` +
+    `<label class="ph-add"><input type="file" accept="image/*" multiple hidden onchange="A.addDraftPhotos('${ctx}',this)">
+      <span class="ph-ic">${PHOTO_ICONS.album}</span><span>相册</span></label>`);
 }
-function photoPicker(ctx) { return `<div class="photos-grid" id="pe-${ctx}">${pickerInner(ctx)}</div>`; }
+function photoPicker(ctx) { return `<div class="photos-grid" id="pe-${ctx}" data-ctx="${ctx}">${pickerInner(ctx)}</div>`; }
+function coverImgHtml(photos, cls) {
+  if (!photos.length) return "";
+  return `<img src="${esc(photoPreviewOf[photos[0]] || photos[0])}" alt="款式图"${cls ? ` class="${cls}"` : ""} loading="lazy" decoding="async"
+    data-gallery="${esc(JSON.stringify(photos))}" data-i="0" onclick="event.stopPropagation();A.lightboxFromEl(this)">`;
+}
 function photoGallery(urls) {
   urls = normalizePhotos(urls);
   if (!urls.length) return "";
   return `<div class="photos-grid ro">${photoThumbs(urls, false)}</div>`;
 }
-// 给大图加双指缩放 + 拖动 + 双击（页面本身仍锁定缩放，这里单独放开）
-function attachLightboxGestures(img) {
-  let scale = 1, tx = 0, ty = 0, mode = null;
-  let startDist = 0, startScale = 1, startX = 0, startY = 0, startTx = 0, startTy = 0, lastTap = 0;
-  const apply = () => { img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
-  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-  img.addEventListener("touchstart", (e) => {
-    if (e.touches.length === 2) {
-      mode = "pinch"; startDist = dist(e.touches); startScale = scale; startTx = tx; startTy = ty; e.preventDefault();
-    } else if (e.touches.length === 1) {
-      const now = Date.now();
-      if (now - lastTap < 300) {              // 双击：放大 / 还原
-        if (scale > 1) { scale = 1; tx = 0; ty = 0; } else { scale = 2.5; }
-        apply(); e.preventDefault();
-      } else if (scale > 1) {                 // 放大后单指拖动
-        mode = "pan"; startX = e.touches[0].clientX; startY = e.touches[0].clientY; startTx = tx; startTy = ty;
-      }
-      lastTap = now;
-    }
-  }, { passive: false });
-  img.addEventListener("touchmove", (e) => {
-    if (mode === "pinch" && e.touches.length === 2) {
-      scale = Math.min(5, Math.max(1, startScale * dist(e.touches) / startDist)); apply(); e.preventDefault();
-    } else if (mode === "pan" && e.touches.length === 1 && scale > 1) {
-      tx = startTx + (e.touches[0].clientX - startX); ty = startTy + (e.touches[0].clientY - startY); apply(); e.preventDefault();
-    }
-  }, { passive: false });
-  img.addEventListener("touchend", () => { if (scale <= 1) { scale = 1; tx = 0; ty = 0; apply(); } mode = null; });
-}
-function renderLightbox() {
-  let el = document.getElementById("lightbox");
-  if (!lightbox) { if (el) el.remove(); return; }
-  if (!el) { el = document.createElement("div"); el.id = "lightbox"; el.className = "lightbox"; document.body.appendChild(el); }
-  const { photos, i } = lightbox;
-  el.innerHTML = `<div class="lb-bar"><span class="lb-count num">${i + 1} / ${photos.length}</span>
-      <button class="lb-close" onclick="A.closeLightbox()">✕</button></div>
-    <img class="lb-img" src="${esc(photos[i])}" alt="照片">
-    ${photos.length > 1 ? `<button class="lb-nav prev" onclick="event.stopPropagation();A.lbStep(-1)">‹</button>
-      <button class="lb-nav next" onclick="event.stopPropagation();A.lbStep(1)">›</button>` : ""}`;
-  // 只有点黑色背景才关闭；点图片是为了缩放，不关
-  el.onclick = (e) => { if (e.target === el) A.closeLightbox(); };
-  const img = el.querySelector(".lb-img");
-  if (img) attachLightboxGestures(img);
-}
 
-/* ================= 路由 ================= */
+/* ================= 大图查看器 =================
+ * 手势参照微信/iOS 相册：滑动翻页、双指缩放、双击放大、下拉关闭、单击关闭；
+ * 电脑上滚轮缩放、方向键翻页、Esc 关闭；安卓返回键先关查看器。动画用可打断的临界阻尼弹簧 */
+const LB = { el: null, s: 1, tx: 0, ty: 0, trackX: 0, dy: 0, fade: 1, v: {}, raf: 0, pushed: false, ignorePop: false };
+const lbRaf = window.requestAnimationFrame ? f => window.requestAnimationFrame(f) : f => setTimeout(() => f(Date.now()), 16);
+const lbCaf = window.cancelAnimationFrame ? id => window.cancelAnimationFrame(id) : id => clearTimeout(id);
+const lbNow = () => (window.performance && performance.now) ? performance.now() : Date.now();
+function reducedMotion() { return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+function lbCurImg() { return LB.el && LB.el.querySelector('.lb-slide[data-k="0"] img'); }
+function lbSize() { return { w: LB.el ? LB.el.clientWidth || 1 : 1, h: LB.el ? LB.el.clientHeight || 1 : 1 }; }
+// 放大后可拖动的范围
+function lbBounds(s) {
+  const img = lbCurImg(), { w, h } = lbSize();
+  if (!img) return { x: 0, y: 0 };
+  return { x: Math.max(0, (img.offsetWidth * s - w) / 2), y: Math.max(0, (img.offsetHeight * s - h) / 2) };
+}
+const clampN = (v, a, b) => Math.min(b, Math.max(a, v));
+// 越界橡皮筋阻力
+function rubber(over, dim) { const c = 0.55; return (over * dim * c) / (dim + c * Math.abs(over)); }
+function rubberClamp(v, lim, dim) { return v > lim ? lim + rubber(v - lim, dim) : v < -lim ? -lim - rubber(-lim - v, dim) : v; }
+// 按松手速度推算落点，px/s
+function lbProject(v, d) { d = d || 0.995; return (v / 1000) * d / (1 - d); }
+function lbPaint() {
+  const el = LB.el; if (!el) return;
+  const track = el.querySelector(".lb-track");
+  if (track) track.style.transform = `translate3d(${LB.trackX}px,0,0)`;
+  const img = lbCurImg();
+  const shrink = 1 - Math.min(Math.abs(LB.dy) / 1400, 0.3);
+  if (img) img.style.transform = `translate3d(${LB.tx}px,${LB.ty + LB.dy}px,0) scale(${LB.s * shrink})`;
+  const fade = LB.fade * (1 - Math.min(Math.abs(LB.dy) / 420, 0.9));
+  el.style.setProperty("--lb-bg", fade.toFixed(3));
+  el.classList.toggle("lb-zoomed", LB.s > 1.01);
+}
+function lbAnimate(targets, opts, done) {
+  lbCaf(LB.raf); LB.raf = 0;
+  const keys = Object.keys(targets);
+  if (reducedMotion()) { keys.forEach(k => { LB[k] = targets[k]; LB.v[k] = 0; }); lbPaint(); if (done) done(); return; }
+  const w = 2 * Math.PI / ((opts && opts.response) || 0.38), t0 = lbNow();
+  const tr = keys.map(k => ({ k, T: targets[k], x0: LB[k] - targets[k], v0: LB.v[k] || 0, eps: (k === "s" || k === "fade") ? 0.001 : 0.35 }));
+  const step = () => {
+    const t = (lbNow() - t0) / 1000; let moving = false;
+    tr.forEach(a => {
+      const B = a.v0 + w * a.x0, e = Math.exp(-w * t);
+      const x = (a.x0 + B * t) * e, v = (a.v0 - w * B * t) * e;
+      LB[a.k] = a.T + x; LB.v[a.k] = v;
+      if (Math.abs(x) > a.eps || Math.abs(v) > a.eps * 40) moving = true;
+    });
+    if (!moving) tr.forEach(a => { LB[a.k] = a.T; LB.v[a.k] = 0; });
+    lbPaint();
+    if (moving && LB.el) LB.raf = lbRaf(step); else { LB.raf = 0; if (done) done(); }
+  };
+  LB.raf = lbRaf(step);
+}
+function lbSlideHtml(k) {
+  const { photos, i } = lightbox, j = i + k;
+  if (j < 0 || j >= photos.length) return "";
+  return `<div class="lb-slide" data-k="${k}" style="left:${k * 100}%"><span class="lb-spin"></span>
+    <img src="${esc(photos[j])}" alt="第 ${j + 1} 张照片" draggable="false"
+      onload="this.parentNode.classList.add('ok')" onerror="this.parentNode.classList.add('bad')">
+    <span class="lb-fail">图片加载失败</span></div>`;
+}
+function lbChrome() {
+  const el = LB.el; if (!el || !lightbox) return;
+  const { photos, i } = lightbox;
+  el.querySelector(".lb-count").textContent = photos.length > 1 ? `${i + 1} / ${photos.length}` : "";
+  // 保存按钮只对本系统图片地址开放
+  const save = el.querySelector(".lb-save"), safe = /^(\/uploads\/|blob:)/.test(photos[i]);
+  save.hidden = !safe;
+  if (safe) { save.href = photos[i]; save.setAttribute("download", "照片" + (i + 1) + "." + ((photos[i].split(".").pop() || "jpg").slice(0, 4))); }
+  else save.removeAttribute("href");
+  el.querySelector(".lb-nav.prev").hidden = i <= 0;
+  el.querySelector(".lb-nav.next").hidden = i >= photos.length - 1;
+}
+function lbRenderSlides() {
+  LB.el.querySelector(".lb-track").innerHTML = lbSlideHtml(-1) + lbSlideHtml(0) + lbSlideHtml(1);
+  // 缓存里的图可能先触发 onload
+  LB.el.querySelectorAll(".lb-slide img").forEach(im => { if (im.complete && im.naturalWidth) im.parentNode.classList.add("ok"); });
+  LB.s = 1; LB.tx = LB.ty = LB.trackX = LB.dy = 0; LB.v = {};
+  lbChrome(); lbPaint();
+}
+// 翻页后挪 DOM 而不是重画，相邻图已加载不会闪
+function lbShift(dir) {
+  const track = LB.el.querySelector(".lb-track");
+  lightbox.i += dir;
+  const gone = track.querySelector(`.lb-slide[data-k="${-dir}"]`); if (gone) gone.remove();
+  const cur = track.querySelector('.lb-slide[data-k="0"]'); if (cur) { cur.dataset.k = -dir; cur.style.left = (-dir * 100) + "%"; const im = cur.querySelector("img"); if (im) im.style.transform = ""; }
+  const nxt = track.querySelector(`.lb-slide[data-k="${dir}"]`); if (nxt) { nxt.dataset.k = 0; nxt.style.left = "0%"; }
+  const html = lbSlideHtml(dir);
+  if (html) track.insertAdjacentHTML(dir > 0 ? "beforeend" : "afterbegin", html);
+  LB.s = 1; LB.tx = LB.ty = LB.trackX = LB.dy = 0; LB.v = {};
+  lbChrome(); lbPaint();
+}
+function lbGo(dir) {
+  if (!lightbox) return;
+  const j = lightbox.i + dir;
+  if (j < 0 || j >= lightbox.photos.length) {  // 到头了弹一下
+    LB.v.trackX = -dir * 900; lbAnimate({ trackX: 0 }, { response: 0.3 });
+    return;
+  }
+  if (!LB.el.clientWidth || reducedMotion()) return lbShift(dir);
+  const { w } = lbSize();
+  lbAnimate({ trackX: -dir * w }, { response: 0.32 }, () => lbShift(dir));
+}
+// 以屏幕某点为中心缩放
+function lbZoomAt(px, py, s1, animate) {
+  const { w, h } = lbSize();
+  const cx = w / 2, cy = h / 2;
+  const ix = (px - cx - LB.tx) / LB.s, iy = (py - cy - LB.ty) / LB.s;
+  const b = lbBounds(s1);
+  const tx = s1 <= 1 ? 0 : clampN(px - cx - s1 * ix, -b.x, b.x), ty = s1 <= 1 ? 0 : clampN(py - cy - s1 * iy, -b.y, b.y);
+  if (animate) lbAnimate({ s: s1, tx, ty }, { response: 0.34 });
+  else { LB.s = s1; LB.tx = tx; LB.ty = ty; lbPaint(); }
+}
+function lbSettle() {  // 松手后缩放拉回 1~5 倍、位置拉回边界
+  const s = clampN(LB.s, 1, 5), b = lbBounds(s);
+  lbAnimate({ s, tx: s <= 1 ? 0 : clampN(LB.tx, -b.x, b.x), ty: s <= 1 ? 0 : clampN(LB.ty, -b.y, b.y) }, { response: 0.36 });
+}
+function lbVelocity(samples) {  // 最近 100ms 的松手速度，px/s
+  const now = lbNow(), rec = samples.filter(p => now - p.t < 100);
+  if (rec.length < 2) return { vx: 0, vy: 0 };
+  const a = rec[0], b = rec[rec.length - 1], dt = Math.max(1, b.t - a.t) / 1000;
+  return { vx: (b.x - a.x) / dt, vy: (b.y - a.y) / dt };
+}
+function lbBindGestures(el) {
+  const pts = new Map();
+  let g = null, lastTap = null, tapTimer = 0;
+  const mid = () => { const a = [...pts.values()]; return { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2, d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) || 1 }; };
+  const startPinch = () => {
+    const m = mid(), { w, h } = lbSize();
+    g = { type: "pinch", s0: LB.s, d0: m.d, ix: (m.x - w / 2 - LB.tx) / LB.s, iy: (m.y - h / 2 - LB.ty) / LB.s };
+    if (LB.trackX || LB.dy) lbAnimate({ trackX: 0, dy: 0 }, { response: 0.3 });
+  };
+  const startOne = (p, pending) => { g = { type: pending ? "pending" : "pan", x0: p.x, y0: p.y, tx0: LB.tx, ty0: LB.ty, track0: LB.trackX, dy0: LB.dy, t0: lbNow(), samples: [{ x: p.x, y: p.y, t: lbNow() }] }; };
+  el.addEventListener("pointerdown", e => {
+    if (e.target.closest("button, a") || (e.pointerType === "mouse" && e.button !== 0)) return;
+    try { el.setPointerCapture(e.pointerId); } catch (err) { }
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+    lbCaf(LB.raf); LB.raf = 0;  // 按下即接住正在进行的动画
+    clearTimeout(tapTimer);  // 新的按下取消待定的单击关闭
+    if (pts.size === 2) startPinch();
+    else if (pts.size === 1) startOne({ x: e.clientX, y: e.clientY }, true);
+  });
+  el.addEventListener("pointermove", e => {
+    if (!pts.has(e.pointerId) || !g) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+    const { w, h } = lbSize();
+    if (g.type === "pinch") {
+      if (pts.size < 2) return;
+      const m = mid();
+      let s = g.s0 * m.d / g.d0;
+      if (s > 5) s = 5 + (s - 5) * 0.25; else if (s < 1) s = Math.max(0.5, 1 - (1 - s) * 0.5);
+      LB.s = s; LB.tx = m.x - w / 2 - s * g.ix; LB.ty = m.y - h / 2 - s * g.iy;
+      lbPaint(); return;
+    }
+    const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
+    g.samples.push({ x: e.clientX, y: e.clientY, t: lbNow() }); if (g.samples.length > 8) g.samples.shift();
+    if (g.type === "pending") {
+      if (Math.hypot(dx, dy) < 8) return;
+      g.type = LB.s > 1.01 ? "pan" : Math.abs(dx) > Math.abs(dy) ? "swipe" : "dismiss";
+      if (g.type === "dismiss" && e.pointerType === "mouse") g.type = "swipe";
+    }
+    if (g.type === "pan") {
+      const b = lbBounds(LB.s);
+      LB.tx = rubberClamp(g.tx0 + dx, b.x, w); LB.ty = rubberClamp(g.ty0 + dy, b.y, h);
+    } else if (g.type === "swipe") {
+      const n = lightbox.photos.length, i = lightbox.i;
+      let x = g.track0 + dx;
+      if ((x > 0 && i === 0) || (x < 0 && i === n - 1)) x = rubber(x, w);
+      LB.trackX = x;
+    } else if (g.type === "dismiss") LB.dy = g.dy0 + dy;
+    lbPaint();
+  });
+  const end = e => {
+    if (!pts.has(e.pointerId)) return;
+    const wasType = pts.get(e.pointerId).type;
+    pts.delete(e.pointerId);
+    if (!g) return;
+    const cancelled = e.type === "pointercancel";
+    if (g.type === "pinch") {
+      if (pts.size === 1) { startOne([...pts.values()][0], false); return; }  // 松开一指，剩下那指接着拖
+      if (!pts.size) { g = null; lbSettle(); }
+      return;
+    }
+    if (pts.size) return;
+    const { w } = lbSize();
+    const v = lbVelocity(g.samples);
+    const type = g.type; g = null;
+    if (type === "pending") { if (!cancelled) lbTap(e.clientX, e.clientY, wasType, e.target); return; }
+    if (type === "swipe") {
+      const land = LB.trackX + lbProject(v.vx, 0.99);
+      const n = lightbox.photos.length, i = lightbox.i;
+      const dir = cancelled ? 0 : land < -w / 2 && i < n - 1 ? 1 : land > w / 2 && i > 0 ? -1 : 0;
+      LB.v.trackX = v.vx;
+      lbAnimate({ trackX: -dir * w }, { response: 0.32 }, () => { if (dir) lbShift(dir); });
+    } else if (type === "dismiss") {
+      const flick = Math.abs(v.vy) > 650 && Math.sign(v.vy) === Math.sign(LB.dy);
+      if (!cancelled && (Math.abs(LB.dy) > 120 || flick)) A.closeLightbox(Math.sign(LB.dy || v.vy) || 1, v.vy);
+      else { LB.v.dy = v.vy; lbAnimate({ dy: 0 }, { response: 0.3 }); }
+    } else if (type === "pan") {
+      const b = lbBounds(LB.s);
+      LB.v.tx = v.vx; LB.v.ty = v.vy;
+      lbAnimate({ tx: clampN(LB.tx + lbProject(v.vx), -b.x, b.x), ty: clampN(LB.ty + lbProject(v.vy), -b.y, b.y), s: clampN(LB.s, 1, 5) }, { response: 0.5 });
+    }
+  };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+  // 触屏自己判断双击(鼠标用 dblclick)
+  function lbTap(x, y, ptype, target) {
+    const now = lbNow();
+    if (ptype !== "mouse" && lastTap && now - lastTap.t < 280 && Math.hypot(x - lastTap.x, y - lastTap.y) < 40) {
+      clearTimeout(tapTimer); lastTap = null;
+      lbZoomAt(x, y, LB.s > 1.01 ? 1 : 2.5, true);
+      return;
+    }
+    lastTap = { t: now, x, y };
+    clearTimeout(tapTimer);
+    if (ptype === "mouse") { if (!target.closest("img")) A.closeLightbox(); return; }
+    tapTimer = setTimeout(() => { lastTap = null; if (lightbox) A.closeLightbox(); }, 280);
+  }
+  el.addEventListener("dblclick", e => { if (e.target.closest("img")) lbZoomAt(e.clientX, e.clientY, LB.s > 1.01 ? 1 : 2.5, true); });
+  el.addEventListener("wheel", e => {
+    e.preventDefault();
+    const f = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));  // ctrlKey = 触控板捏合
+    lbZoomAt(e.clientX, e.clientY, clampN(LB.s * f, 1, 5), false);
+  }, { passive: false });
+}
+function lbKey(e) {
+  if (!lightbox) return;
+  if (e.key === "Escape") A.closeLightbox();
+  else if (e.key === "ArrowLeft") lbGo(-1);
+  else if (e.key === "ArrowRight") lbGo(1);
+}
+// 从缩略图位置放大出来
+function lbOpenFrom(rect) {
+  const img = lbCurImg();
+  const run = () => {
+    if (!LB.el || !rect || !img || !img.offsetWidth || reducedMotion()) { LB.fade = 1; lbPaint(); return; }
+    const { w, h } = lbSize();
+    LB.s = Math.max(0.05, Math.min(rect.width / img.offsetWidth, rect.height / img.offsetHeight));
+    LB.tx = rect.left + rect.width / 2 - w / 2; LB.ty = rect.top + rect.height / 2 - h / 2; LB.fade = 0;
+    lbPaint();
+    lbAnimate({ s: 1, tx: 0, ty: 0, fade: 1 }, { response: 0.36 });
+  };
+  LB.fade = 0; lbPaint();
+  if (img && img.complete && img.naturalWidth) run();
+  else if (img) { img.addEventListener("load", run, { once: true }); img.addEventListener("error", run, { once: true }); setTimeout(() => { if (LB.fade === 0) run(); }, 400); }
+  else run();
+}
+function openLightbox(photos, i, fromRect) {
+  if (!photos || !photos.length) return;
+  lightbox = { photos, i: clampN(i || 0, 0, photos.length - 1) };
+  let el = document.getElementById("lightbox");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "lightbox"; el.className = "lightbox";
+    el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true"); el.setAttribute("aria-label", "查看照片");
+    el.innerHTML = `<div class="lb-track"></div>
+      <div class="lb-bar"><span class="lb-count num"></span><span class="lb-acts">
+        <a class="lb-btn lb-save" aria-label="保存照片" title="保存照片">${PHOTO_ICONS.save}</a>
+        <button type="button" class="lb-btn lb-close" aria-label="关闭" onclick="A.closeLightbox()">✕</button></span></div>
+      <button type="button" class="lb-nav prev" aria-label="上一张" onclick="A.lbStep(-1)">‹</button>
+      <button type="button" class="lb-nav next" aria-label="下一张" onclick="A.lbStep(1)">›</button>`;
+    document.body.appendChild(el);
+    LB.el = el;
+    lbBindGestures(el);
+    document.addEventListener("keydown", lbKey);
+    document.documentElement.classList.add("lb-open");
+    // 压一条历史，安卓返回键先关查看器
+    try { history.pushState({ lb: 1 }, ""); LB.pushed = true; } catch (e) { LB.pushed = false; }
+  }
+  LB.el = el; LB.fade = 1;
+  lbRenderSlides();
+  if (fromRect) lbOpenFrom(fromRect);
+  const closeBtn = el.querySelector(".lb-close"); if (closeBtn && closeBtn.focus) closeBtn.focus({ preventScroll: true });
+}
+// 关闭：立刻摘掉 id，画面再淡出或顺着下拉方向滑走
+function closeLightboxNow(dir, vy, fromPop) {
+  const el = LB.el || document.getElementById("lightbox");
+  lightbox = null;
+  document.removeEventListener("keydown", lbKey);
+  document.documentElement.classList.remove("lb-open");
+  if (LB.pushed && !fromPop) { LB.pushed = false; LB.ignorePop = true; try { history.back(); } catch (e) { LB.ignorePop = false; } }
+  LB.pushed = false;
+  if (!el) return;
+  el.id = ""; el.classList.add("lb-closing"); el.style.pointerEvents = "none";
+  LB.el = el;
+  const finish = () => { el.remove(); if (LB.el === el) LB.el = null; };
+  if (reducedMotion() || !dir) { el.style.opacity = "0"; setTimeout(finish, 160); return; }
+  LB.v.dy = vy || dir * 1200;
+  lbAnimate({ dy: dir * lbSize().h, fade: 0 }, { response: 0.3 }, finish);
+  setTimeout(finish, 600);
+}
+window.addEventListener("popstate", () => {
+  if (LB.ignorePop) { LB.ignorePop = false; return; }
+  if (lightbox) { LB.pushed = false; closeLightboxNow(0, 0, true); }
+});
+
+// ================= 路由 =================
 function go(v, id) {
   route = { v, id: id || null }; editingBasic = false; editingFollower = false;
-  photoDraft = {}; lightbox = null; state.notifs.open = false;
+  photoDraft = {}; resetPhotoPending(); state.notifs.open = false;
+  if (lightbox) closeLightboxNow(0, 0, false);
   if (v !== "chat") { state.chat.activeId = null; state.chat.messages = []; state.chat.draft = ""; state.chat.att = null; }
   render(); window.scrollTo(0, 0);
   if (v === "account") { A.loadMyLogs(state.me.id); refreshPushState(true); }
@@ -576,10 +982,7 @@ function go(v, id) {
   if (v === "notifs") A.loadNotifs();
 }
 
-/* 每个页面的标题栏配置
- * crumb：桌面端侧边栏常驻导航，不需要手机端那种"‹ 返回上一页"手势，
- * 所以额外给出面包屑用的 {label, fn}（跟 left 的返回按钮指向同一个父级），
- * 桌面端 CSS 会隐藏 left 返回按钮、改显示这个面包屑；手机端渲染逻辑完全不变。 */
+// 各页标题栏；crumb 给桌面端面包屑用
 function pageMeta() {
   const back = (label, fn) => `<button class="nav-btn" onclick="${fn}">‹ ${esc(label)}</button>`;
   const crumb = (label, fn) => ({ label, fn });
@@ -603,6 +1006,7 @@ function pageMeta() {
   }
 }
 const ICONS = {
+  shirt: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 4.5 6.5 3 11l3 1.2V20h12v-7.8l3-1.2-1.5-4.5L15 4c-.6 1.3-1.7 2-3 2s-2.4-.7-3-2z"/></svg>`,
   orders: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8a2 2 0 0 1 2 2v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6a2 2 0 0 1 2-2z"/><path d="M9 3h6v3H9z"/><path d="M9.5 11h5M9.5 15h5"/></svg>`,
   chat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a7.5 7.5 0 0 1-7.5 7.5c-1.2 0-2.3-.25-3.3-.7L4.5 20l1.3-4.2A7.4 7.4 0 0 1 5 12a7.5 7.5 0 0 1 15 0z"/></svg>`,
   admin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 14a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V20a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H4a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H10a1.6 1.6 0 0 0 1-1.5V4a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V10a1.6 1.6 0 0 0 1.5 1H20a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>`,
@@ -615,7 +1019,9 @@ const ICONS = {
   pulse: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12.5h3.6l2.3-5.6 3.4 10.2 2.5-6.1 1.6 1.5H21"/></svg>`
 };
 const badgeHtml = n => n ? `<span class="badge">${n > 99 ? "99+" : n}</span>` : "";
-// Tab 栏上每个入口的红点数：聊天用聊天未读，「我的」用通知未读(通知入口在「我的」页里)
+const chipHtml = (label, onDel) => `<span class="tag role">${esc(label)}${
+  onDel ? ` <a href="javascript:void(0)" onclick="${onDel}" style="margin-left:4px">✕</a>` : ""}</span>`;
+// 聊天用聊天未读，「我的」用通知未读
 function tabBadgeOf(v) {
   if (v === "chat") return state.unread.total;
   if (v === "account" || v === "notifs") return state.notifs.unread;
@@ -634,10 +1040,7 @@ function tabbarHtml() {
       <span>${label}</span></button>`).join("")}</nav>`;
 }
 
-/* ---------- 桌面端（≥1024px）专用的侧边栏 + 顶部条 ----------
- * 这两块在窄屏下由 CSS 直接 display:none，手机端看到的东西跟以前一模一样；
- * 宽屏下它们接管导航，底部 Tab 栏和居中标题栏则被隐藏/改造成页面标题。
- */
+// ---------- 桌面端侧边栏 + 顶部条（窄屏隐藏） ----------
 function sidebarHtml() {
   const m = me();
   const groups = [
@@ -665,8 +1068,7 @@ function sidebarHtml() {
       <div class="ds-me"><div class="ds-me-name">${esc(m.name)}</div><div class="ds-me-role">${esc(roleLabelOf(m))}</div></div>
     </div></aside>`;
 }
-// actorName/orderLabel/what 存在时用"头像 + 姓名 + 订单号胶囊 + 具体改了什么"的卡片式展示；
-// 老通知(升级前生成的)这几列是 NULL，退回最初的纯文本单行展示，不强行拼凑
+// 老通知没有 actorName 等字段，退回纯文本
 function notifItemsHtml() {
   const list = state.notifs.list;
   if (!list) return `<div class="empty">加载中…</div>`;
@@ -683,7 +1085,8 @@ function notifItemsHtml() {
         <div class="n-what">${esc(n.what)}</div>` : `
         <div class="n-text">${esc(n.text)}</div>
         <div class="n-time num">${fmtT(n.createdAt)}</div>`}
-      </div></div>`;
+      </div><button type="button" class="n-del" title="删除这条通知" aria-label="删除这条通知"
+        onclick="event.stopPropagation();A.deleteNotif('${n.id}')">✕</button></div>`;
   }).join("");
 }
 function deskHeaderHtml() {
@@ -698,7 +1101,8 @@ function deskHeaderHtml() {
     </div>
     ${n.open ? `<div class="notif-back" onclick="A.closeNotifPanel()"></div>
       <div class="notif-panel"><div class="np-head"><span>消息通知</span>
-        <button class="btn plain" onclick="event.stopPropagation();A.markAllNotifsRead()">全部已读</button></div>
+        <span class="np-acts">${(n.list || []).some(x => x.read) ? `<button class="btn plain" onclick="event.stopPropagation();A.clearReadNotifs()">清空已读</button>` : ""}
+        <button class="btn plain" onclick="event.stopPropagation();A.markAllNotifsRead()">全部已读</button></span></div>
       <div class="np-list">${notifItemsHtml()}</div>
       <div class="np-foot"><button class="btn plain block" onclick="A.closeNotifPanel();go('notifs')">查看全部通知</button></div></div>` : ""}
   </div>`;
@@ -706,7 +1110,6 @@ function deskHeaderHtml() {
 
 function render() {
   const app = $("app");
-  // 欢迎界面不依赖 me() 是否已加载完成，这样能在接口返回前就先顶上，不留空白
   if (showWelcome) { app.innerHTML = vWelcome(); return; }
   if (!me()) { app.innerHTML = vLogin(); return; }
   const meta = pageMeta();
@@ -726,14 +1129,15 @@ function render() {
       (views[route.v] || vOrders)()}</main>`;
 }
 
-/* ---------- 登录 ---------- */
-function vLogin() {
-  return `<div class="login-page"><div class="login-inner">
-    <div class="login-brand">
+// ---------- 登录 ----------
+const brandHtml = () => `<div class="login-brand">
       <div class="login-logo">${APP_LOGO}</div>
       <p class="login-company">${esc(COMPANY_NAME)}</p>
       <h1 class="login-title">${esc(APP_NAME)}</h1>
-    </div>
+    </div>`;
+function vLogin() {
+  return `<div class="login-page"><div class="login-inner">
+    ${brandHtml()}
     <div class="login-card">
       <label class="lg-field"><span>手机号</span>
         <input id="lg-phone" inputmode="tel" autocomplete="username" placeholder="请输入手机号"></label>
@@ -742,34 +1146,23 @@ function vLogin() {
           onkeydown="if(event.key==='Enter')A.login()"></label>
     </div>
     <button class="btn block login-btn" onclick="A.login()">登 录</button>
-    ${(isStandalone() || !isMobileDevice()) ? "" : `<button class="btn ghost block install-cta" onclick="A.install()">📲 安装到手机（像 App 一样用）</button>`}
+    ${canOfferInstall() ? `<button class="btn ghost block install-cta" onclick="A.install()">📲 安装到手机（像 App 一样用）</button>` : ""}
   </div></div>`;
 }
 
-/* ---------- 登录成功后的欢迎界面：logo / 公司名称 / 跟单系统 ---------- */
 function vWelcome() {
-  return `<div class="login-page" onclick="A.dismissWelcome()">
-    <div class="login-inner">
-      <div class="login-brand">
-        <div class="login-logo">${APP_LOGO}</div>
-        <p class="login-company">${esc(COMPANY_NAME)}</p>
-        <h1 class="login-title">${esc(APP_NAME)}</h1>
-      </div>
-    </div></div>`;
+  return `<div class="login-page" onclick="A.dismissWelcome()"><div class="login-inner">${brandHtml()}</div></div>`;
 }
 
-/* ---------- 订单列表 ---------- */
+// ---------- 订单列表 ----------
 function latestLog(o) {
   let best = null;
-  const all = [...state.fields.order, ...state.fields.production].filter(f => f.type === "log");
-  for (const f of all) for (const e of (o.logs[f.k] || [])) if (!best || e.t > best.t) best = { ...e, fieldLabel: f.label };
+  for (const f of allFieldDefs().filter(f => f.type === "log")) for (const e of (o.logs[f.k] || [])) if (!best || e.t > best.t) best = { ...e, fieldLabel: f.label };
   for (const s of (o.subs || [])) for (const e of s.log) if (!best || e.t > best.t) best = { ...e, fieldLabel: s.name };
   return best;
 }
-// 最近 7 天内有过打卡更新
 const isRecent = l => !!l && (Date.now() - l.t) <= 7 * 24 * 60 * 60 * 1000;
-// 概览卡片点出来的筛选条件，在订单列表标题旁边显示成一个可一键取消的标签；
-// 手机端没有概览卡片，filt.ship/filt.recent 永远是空的，所以这个标签在手机端不会出现
+// 概览卡片筛选条件显示成可取消的标签
 function statFilterChip() {
   const label = filt.ship === "pending" ? "进行中（未填发货日期）"
     : filt.ship === "shipped" ? "已发货" : filt.recent ? "近7天有更新" : "";
@@ -779,8 +1172,7 @@ function statFilterChip() {
 }
 function vOrders() {
   const factoriesOf = o => [o.values.factory, o.values.fabricFactory1, o.values.fabricFactory2, o.values.embFactory, o.values.printFactory].flat().filter(Boolean);
-  // 概览卡片的数字要跟季节/业务员/下厂员/搜索/工厂这些筛选保持一致——不然搜索框里填了关键词后，
-  // 卡片还是按全部订单算数，点开却是"卡片数字 ∩ 搜索关键词"，两个数对不上，很confusing
+  // 概览卡片的数字跟随其它筛选条件
   const baseFiltered = state.orders.filter(o =>
     (!filt.season || o.season === filt.season) &&
     (!filt.sales || o.values.sales === filt.sales) &&
@@ -790,21 +1182,22 @@ function vOrders() {
     (!filt.factoryKw || factoriesOf(o).includes(filt.factoryKw))
   );
   const list = baseFiltered.filter(o =>
-    // 发货状态：由桌面端概览卡片「进行中」「已发货」点出来的筛选(手机端没有这两张卡，filt.ship 始终为空)
     (!filt.ship || (filt.ship === "shipped" ? !!o.values.shipDate : !o.values.shipDate)) &&
     (!filt.recent || isRecent(latestLog(o)))
   ).slice().sort((a, b) => b.createdAt - a.createdAt);
   const opt = (arr, cur) => arr.map(([v, t]) =>
     `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(t)}</option>`).join("");
   const allFactories = [...new Set([...state.factories.prod, ...state.factories.fabric, ...state.factories.emb])];
-  // 业务员自己看到的订单本来就都是自己的，"全部业务员"筛选对他没意义，不显示；下厂员同理
+  // 业务员/下厂员看不到对应的人员筛选
   const myTemplate = (me() || {}).template;
-  // 桌面端概览卡片：窄屏下由 CSS 隐藏，手机端看不到，布局跟以前完全一致
   const all = baseFiltered;
   const shipped = all.filter(o => o.values.shipDate).length;
   const recent = all.filter(o => isRecent(latestLog(o))).length;
   const pct = n => all.length ? Math.round(n / all.length * 100) + "%" : "—";
-  // 每张卡片都能点：点了就把订单列表按对应条件筛出来，再点一次取消（「订单总数」是清空这两个条件）
+  // state.orders 已按权限过滤，合计的是自己能看到的
+  const qtySum = arr => arr.reduce((t, o) => t + (parseFloat(String(o.values.qty || "").replace(/[,，\s]/g, "")) || 0), 0)
+    .toLocaleString("zh-CN");
+  // 点卡片按条件筛选，再点取消
   const statActive = k => k === "all" ? (!filt.ship && !filt.recent)
     : k === "recent" ? !!filt.recent : filt.ship === k;
   const statCard = (key, label, value, sub, icon, tone) => `<button type="button"
@@ -815,42 +1208,43 @@ function vOrders() {
       <div class="dstat-num num">${esc(String(value))}</div>
       <div class="dstat-sub">${esc(sub)}</div></div></button>`;
   return `<section class="group dstats-wrap"><div class="dstats">
-      ${statCard("all", "订单总数", all.length, "我可见的全部订单", ICONS.orders)}
+      ${statCard("all", "订单总数", all.length, "合计数量 " + qtySum(all) + " 件", ICONS.orders)}
       ${statCard("pending", "进行中", all.length - shipped, "尚未填写发货日期", ICONS.clock, "warn")}
       ${statCard("shipped", "已发货", shipped, "占 " + pct(shipped), ICONS.truck, "ok")}
       ${statCard("recent", "近7天有更新", recent, "占 " + pct(recent), ICONS.pulse, "sky")}
     </div></section>
   <section class="group">
     <div class="card"><div class="filters">
-      <select class="in" onchange="A.setF('season',this.value)"><option value="">全部季节</option>${opt(seasonOptions("").map(s => [s, s]), filt.season)}</select>
-      ${myTemplate === "sales" ? "" : `<select class="in" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]), filt.sales)}</select>`}
-      ${myTemplate === "follower" ? "" : `<select class="in" onchange="A.setF('follower',this.value)"><option value="">全部下厂员</option>${opt(state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]), filt.follower)}</select>`}
-      <input class="in" id="flt-kw" placeholder="搜货号 / 款式名" value="${esc(filt.kw)}" oninput="A.setFKw(this.value)">
-      <select class="in" onchange="A.setF('factoryKw',this.value)"><option value="">全部工厂</option>${opt(allFactories.map(x => [x, x]), filt.factoryKw)}</select>
+      <input class="in f-kw" id="flt-kw" type="search" enterkeyhint="search" autocomplete="off" placeholder="搜货号 / 款式名" value="${esc(filt.kw)}" oninput="A.setFKw(this.value)">
+      <div class="f-chips">
+      <select class="in${filt.season ? " on" : ""}" aria-label="按季节筛选" onchange="A.setF('season',this.value)"><option value="">全部季节</option>${opt(seasonOptions("").map(s => [s, s]), filt.season)}</select>
+      ${myTemplate === "sales" ? "" : `<select class="in${filt.sales ? " on" : ""}" aria-label="按业务员筛选" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]), filt.sales)}</select>`}
+      ${myTemplate === "follower" ? "" : `<select class="in${filt.follower ? " on" : ""}" aria-label="按下厂员筛选" onchange="A.setF('follower',this.value)"><option value="">全部下厂员</option>${opt(state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]), filt.follower)}</select>`}
+      <select class="in${filt.factoryKw ? " on" : ""}" aria-label="按工厂筛选" onchange="A.setF('factoryKw',this.value)"><option value="">全部工厂</option>${opt(allFactories.map(x => [x, x]), filt.factoryKw)}</select>
+      </div>
     </div></div></section>
   <section class="group">
-    <div class="group-title">订单列表 · 共 ${list.length} 单${statFilterChip()}</div>
+    <div class="group-title">订单列表 · 共 ${list.length} 单 · ${qtySum(list)} 件${statFilterChip()}</div>
     <div class="card olist">${list.map(o => {
       const latest = latestLog(o);
       return `<div class="ocard" onclick="go('detail','${o.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')go('detail','${o.id}')">
-        <div class="thumb">${(function(){const photos=normalizePhotos(o.values.img);return photos.length?`<img src="${esc(photos[0])}" alt="款式图" data-gallery='${JSON.stringify(photos)}' data-i="0" onclick="event.stopPropagation();A.lightboxFromEl(this)">`:"款式图";})()}</div>
+        <div class="thumb">${coverImgHtml(normalizePhotos(o.values.img)) || `<span class="thumb-ph" aria-label="暂无款式图">${ICONS.shirt}</span>`}</div>
         <div class="o-main">
-          <div class="o-title"><span class="tag season">${esc(o.season)}</span>${esc(o.values.styleNo || "")} ${esc([o.values.styleName, o.values.style].filter(Boolean).join(" "))}</div>
+          <div class="o-title">${seasonTag(o.season)}${esc(o.values.styleNo || "")} ${esc([o.values.styleName, o.values.style].filter(Boolean).join(" "))}</div>
           <div class="o-meta"><span>业务员 ${esc(uname(o.values.sales)) || "—"}</span><span>下厂员 ${esc(uname(o.values.follower)) || "未指定"}</span>
             <span class="num">数量 ${esc(o.values.qty || "-")}</span><span>交期 ${esc(fmtDate(o.values.deadline)) || "-"}</span></div>
-          ${latest && (Date.now() - latest.t) <= 7 * 24 * 60 * 60 * 1000
+          ${isRecent(latest)
             ? `<div class="o-latest">最新：${esc(latest.fieldLabel)} · ${esc(latest.text)} <span class="num">(${fmtT(latest.t)})</span></div>` : ""}
         </div><span class="chev">›</span></div>`;
     }).join("") || `<div class="empty">${state.orders.length ? "没有符合条件的订单" : "还没有订单，点右上角 ＋ 新建"}</div>`}</div>
   </section>`;
 }
 
-/* ---------- 新建订单 / 批量导入 ---------- */
+// ---------- 新建订单 / 批量导入 ----------
 function vNew() {
-  const scalars = s => state.fields[s].filter(f => f.type !== "log");
+  const scalars = scalarFields;
   if (!photoDraft.img) photoDraft.img = [];
-  // 新建时日期默认当天，业务员默认自己——但"发货日期"不能默认今天，
-  // 否则订单一创建就会被当成"已发货"锁死(shipLocked)，业务员自己都编辑不了
+  // 日期默认今天，但发货日期不能默认(填了就锁单)
   const defVal = f => (f.type === "date" && f.k !== "shipDate") ? todayStr()
     : (f.k === "sales" && me().template === "sales" ? me().id : "");
   return `<section class="group">
@@ -869,39 +1263,55 @@ function vNew() {
       <button class="btn block" onclick="A.createOrder()">保存订单</button></div>
   </section>
   <section class="group">
-    <div class="group-title">表格批量导入</div>
+    <div class="group-title">表格批量导入<button type="button" class="btn plain right" onclick="A.downloadImportTemplate()">下载导入模板</button></div>
     <div class="card"><div class="card-pad">
-      <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">支持 <b>Excel(.xlsx/.xls)</b> 和 <b>CSV(.csv/.txt)</b>，也可以把表格内容直接复制粘贴到下面。第一行为表头，按“货号、款式名、款式、数量、款式描述、订单交期、面料、业务员、下厂员、季节”等列名识别。识别后会<b>填入下方表单</b>，可逐项修改，确认后再导入。</p>
-      <div style="margin-bottom:10px">${fileFieldHtml("imp-file", ".xlsx,.xls,.csv,.txt", "A.importFile(this)", "选择表格文件")}</div>
-      <textarea class="in" id="imp-text" placeholder="或将 Excel 中选中的区域直接粘贴到这里（含表头）">${esc(importRaw)}</textarea>
-      <div style="margin-top:10px"><button class="btn ghost" onclick="A.importText()">识别数据</button></div>
+      <div class="imp-drop" data-drop="import">
+        <input type="file" id="imp-file" class="file-native" accept=".xlsx,.xls,.csv,.txt" onchange="A.importFile(this)">
+        <button type="button" class="imp-drop-btn" onclick="document.getElementById('imp-file').click()">
+          <span class="imp-drop-ic">${ICONS.orders}</span>
+          <span class="imp-drop-main" id="imp-file--name">选择 Excel / CSV 文件</span>
+          <span class="imp-drop-sub">支持 .xlsx .xls .csv<span class="imp-drop-desk">，也可以把文件拖到这里</span></span>
+        </button>
+      </div>
+      <p class="imp-help">按第一行的列名识别（货号、款式名、数量、交期、业务员、下厂员、季节…），表格里贴的款式图会自动带上。识别后先预览，<b>确认后才会导入</b>。</p>
+      <details class="imp-paste"${importRaw ? " open" : ""}><summary>或者直接粘贴表格内容</summary>
+        <textarea class="in" id="imp-text" placeholder="在 Excel / WPS 里选中要导入的区域(含表头)，复制后粘贴到这里">${esc(importRaw)}</textarea>
+        <div style="margin-top:10px"><button class="btn ghost" onclick="A.importText()">识别粘贴的内容</button></div>
+      </details>
     </div>${importPreview ? importPreviewHtml() : ""}</div>
   </section>`;
 }
-function importScalars() {
-  return [...state.fields.order.filter(f => f.type !== "log" && f.type !== "image"),
-          ...state.fields.production.filter(f => f.type !== "log")];
-}
+const importScalars = () => [...scalarFields("order").filter(f => f.type !== "image"), ...scalarFields("production")];
 function importPreviewHtml() {
-  const orderScalars = state.fields.order.filter(f => f.type !== "log" && f.type !== "image");
-  const prodScalars = state.fields.production.filter(f => f.type !== "log");
-  return `<div style="padding:0 16px 4px;font-size:13.5px;color:var(--ink-2)">
-      <b>识别结果</b>：共 ${importPreview.length} 单，<b>尚未保存</b>。可直接修改任意字段，确认后再导入。系统里查不到的姓名会显示“请选择”，请手动选。</div>
-    ${importPreview.map((r, i) => `<div class="imp-block">
-      <div class="imp-head">第 ${i + 1} 单${importPreview.length > 1 ?
-        `<button class="btn plain right" style="color:var(--bad)" onclick="A.removeImportRow(${i})">移除</button>` : ""}</div>
+  const orderScalars = scalarFields("order").filter(f => f.type !== "image"), prodScalars = scalarFields("production");
+  const n = importPreview.length, warnRows = importPreview.filter(r => r.warn && r.warn.length).length;
+  // 少于 4 单全部展开，否则只展开有问题的
+  const openAll = n <= 3;
+  return `<div class="imp-summary${warnRows ? " warn" : ""}">
+      <div class="imp-sum-main">识别到 <b class="num">${n}</b> 单，尚未保存${warnRows ? `，其中 <b class="num">${warnRows}</b> 单需要确认` : "，没发现问题"}</div>
+      <div class="imp-sum-sub">可以直接修改下面任意字段，确认无误后点底部「确认导入」。</div>
+      ${importUnknownCols.length ? `<div class="imp-sum-sub">这些列没认出来，不会导入：${importUnknownCols.map(esc).join("、")}</div>` : ""}
+    </div>
+    ${importPreview.map((r, i) => {
+      const w = r.warn || [];
+      return `<details class="imp-block${w.length ? " has-warn" : ""}"${openAll || w.length ? " open" : ""}>
+      <summary class="imp-head"><span class="imp-no num">${i + 1}</span>
+        <span class="imp-title">${esc(r.values.styleNo || "")} ${esc(r.values.styleName || "")}</span>
+        ${w.length ? `<span class="tag warn">${w.length} 处待确认</span>` : ""}
+        ${n > 1 ? `<button type="button" class="act-btn danger" onclick="event.preventDefault();A.removeImportRow(${i})">移除</button>` : ""}</summary>
+      ${w.length ? `<ul class="imp-warns">${w.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
       <label class="field"><span>订单季节</span>${seasonSelectHtml(r.season, "imp" + i + "-")}</label>
       <label class="field"><span>款式图</span>${photoPicker("imp" + i + "-img")}</label>
       <div class="grid2">${orderScalars.map(f => fieldRow(f, r.values[f.k] || "", "imp" + i + "-")).join("")}</div>
       <div class="grid2">${prodScalars.map(f => fieldRow(f, r.values[f.k] || "", "imp" + i + "-")).join("")}</div>
-    </div>`).join("")}
-    <div class="btn-row">
-      <button class="btn" onclick="A.confirmImport()">确认导入 ${importPreview.length} 单</button>
+    </details>`;
+    }).join("")}
+    <div class="btn-row imp-actions">
+      <button class="btn" onclick="A.confirmImport()">确认导入 ${n} 单</button>
       <button class="btn ghost" onclick="A.cancelImport()">取消</button></div>`;
 }
 
-/* ---------- 订单详情 ---------- */
-// 一条打卡记录的展示（改/删链接 + 文字 + 照片），主厂/加工点/普通进度字段共用
+// ---------- 订单详情 ----------
 function logEntriesHtml(list, o, key, section) {
   const entries = (list || []).slice().sort((a, b) => b.t - a.t);
   if (!entries.length) return `<div class="empty" style="padding:8px 0">暂无打卡记录</div>`;
@@ -914,7 +1324,7 @@ function logEntriesHtml(list, o, key, section) {
       生产工序：${esc(e.process)} · 车工人数：${esc(e.workers)} · 预计下车：${esc(fmtDate(e.estDone))}</div>` : ""}
     ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>`;
 }
-// 主厂/加工点打卡：生产工序/车工人数/预计下车时间是必填项（其它进度字段仍是纯文字打卡）
+// 本厂/加工点打卡必填工序、人数、预计下车时间
 function mainSubAddBoxHtml(oid, key, placeholder) {
   return `<div class="addbox" id="add-${key}">
     <label class="field"><span>生产工序</span><input class="in" id="proc-${key}" placeholder="例：车缝、锁边"></label>
@@ -934,22 +1344,20 @@ function logFieldHtml(o, f, list, addKey, canAdd, section) {
       <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','${addKey}')">提交打卡</button></div></div>` : ""}
     ${logEntriesHtml(list, o, addKey, section)}</div>`;
 }
-// 一个动态"加工点"卡片：可编辑(名称+工序/人数/预计下车时间)、可打卡、管理员可删除——始终属于"二、生产明细"
 function subCardHtml(o, s, canProdLog) {
   const key = "sub:" + s.id;
   return `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
-    <div class="lf-head" style="font-size:14.5px">
-      <span>加工点</span> <span class="tag hl">${esc(s.name)}</span>
-      ${canProdLog ? `<button type="button" class="act-btn" onclick="A.renameSub('${o.id}','${s.id}')">改名</button>` : ""}
-      ${isAdmin() ? `<button type="button" class="act-btn danger" onclick="A.delSub('${o.id}','${s.id}')">删除</button>` : ""}
+    <div class="lf-head fac-head">
+      <span class="fac-kind">加工点</span><span class="tag hl">${esc(s.name)}</span>
+      ${canProdLog || isAdmin() ? `<span class="act-row">${canProdLog ? `<button type="button" class="act-btn" onclick="A.renameSub('${o.id}','${s.id}')">改名</button>` : ""}${
+        isAdmin() ? `<button type="button" class="act-btn danger" onclick="A.delSub('${o.id}','${s.id}')">删除</button>` : ""}</span>` : ""}
       ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('${key}')">＋ 打卡</button>` : ""}
     </div>
     ${canProdLog ? mainSubAddBoxHtml(o.id, key, "该加工点的进度情况（补充说明，选填）…") : ""}
     ${logEntriesHtml(s.log, o, key, "production")}</div>`;
 }
-// 验货：一条"发现问题/整改情况"的展示（两个字段各自独立可编辑）
 function inspItemHtml(o, g, it, canInsp, canFix) {
-  // 没权限填整改时，说清楚是谁该填，而不是只留一个空白的"待整改"（否则看着像坏了）
+  // 没权限填整改时写明该谁填
   const fixHint = o.values.follower ? `由 ${esc(uname(o.values.follower))} 或管理员填写` : "尚未指定下厂员，需管理员先在「生产明细」指定负责人";
   return `<div class="insp-item">
     <div><span class="lbl p">发现问题</span>${esc(it.problem)}
@@ -970,21 +1378,17 @@ function inspBatchHtml(o, g, canInsp, canFix) {
 function vDetail() {
   const o = state.orders.find(x => x.id === route.id);
   if (!o) return `<div class="card"><div class="empty">订单不存在</div></div>`;
-  const scalars = s => state.fields[s].filter(f => f.type !== "log");
+  const scalars = scalarFields;
   const logsOf = s => state.fields[s].filter(f => f.type === "log");
-  // "一、订单明细"(含生产安排字段/指定下厂员)只有业务员(自己的单)能改；"发货日期"跟打卡记录
-  // 按各自板块走(下厂员管二)；主管/管理员两块都不受限
   const canEditOrd = canEditSection(o, "order");
   const canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
   const canInsp = canWriteInspProblem(o), canFix = canWriteInspFix(o);
-  // 订单交期/发货日期这两个字段单独摘出来，有编辑权限时直接在详情页点选就改，不用进编辑页；
-  // 其它日期类字段(比如预计下车时间)是普通字段，跟着所属的分组(服装工厂旁边)走正常编辑流程
+  // 订单交期/发货日期可在详情页直接选
   const isQuickDateField = f => f.k === "deadline" || f.k === "shipDate";
   const kv = (fs, canEditThis) => fs.map(f => {
     const isShipDateRow = f.k === "shipDate";
     const rowStyle = isShipDateRow ? ` style="border-bottom:0"` : "";
-    // 发货日期已锁定、当前用户又能改(管理员/主管)时，输入框旁边加个"清空"按钮——
-    // 撤销误填比重新点开日期选择器改成空值更直接，避免误触
+    // 发货日期已锁定且有权改时显示「清空」
     const showClearBtn = isShipDateRow && canEditThis && shipLocked(o);
     const clearBtn = showClearBtn ? `<button class="btn mini ghost" onclick="A.clearShipDate('${o.id}')">清空</button>` : "";
     const row = isQuickDateField(f) && canEditThis
@@ -992,16 +1396,13 @@ function vDetail() {
           <div class="row-value" style="display:flex;align-items:center;gap:10px">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}${clearBtn}</div></div>`
       : `<div class="row-item"${rowStyle}><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
           <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`;
-    // 默认就提示，不用等选完发货日期才出现——避免有人不知道这个限制就先选了
     const warn = isShipDateRow ? `<div style="margin:0 16px 12px;padding:10px 14px;border-radius:var(--radius);background:var(--bad-soft);color:var(--bad);font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px">
         <span>⚠️</span><span>发货日期一旦选择，不可以再次修改</span></div>` : "";
     return row + warn;
   }).join("");
-  // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
   const editForm = s => `<div class="grid2">${scalars(s).filter(f => !isQuickDateField(f)).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
   const photos = normalizePhotos(o.values.img);
-  const headerThumb = photos.length ? `<img src="${esc(photos[0])}" alt="款式图" class="header-thumb"
-    data-gallery='${JSON.stringify(photos)}' data-i="0" onclick="A.lightboxFromEl(this)">` : "";
+  const headerThumb = coverImgHtml(photos, "header-thumb");
   const dateFieldsProd = scalars("production").filter(isQuickDateField);
   const topProdScalars = scalars("production").filter(f => !isQuickDateField(f));
   const orderKvFields = scalars("order").filter(f => f.type !== "image" && !isQuickDateField(f));
@@ -1009,7 +1410,7 @@ function vDetail() {
 
   return `<section class="group g-head">
     <div class="card"><div class="card-pad" style="display:flex;align-items:center;gap:14px">
-      <span class="tag season" style="flex:none;font-size:14px;padding:5px 12px">${esc(o.season)}</span>
+      ${seasonTag(o.season, "flex:none;font-size:14px;padding:5px 12px")}
       <div style="flex:1;min-width:0">
         <div style="font-size:20px;font-weight:700;letter-spacing:-.02em">${esc(o.values.styleNo || "")}</div>
         <div style="color:var(--ink-2);margin-top:2px">${esc([o.values.styleName, o.values.style].filter(Boolean).join(" "))}</div>
@@ -1038,7 +1439,7 @@ function vDetail() {
       <div class="prodgroup-title"><span><span class="lf-dot"></span>生产进度</span></div>
       <div class="logfield" style="padding-top:0">
         <div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
-          <div class="lf-head" style="font-size:14.5px"><span>本厂</span>
+          <div class="lf-head fac-head"><span class="fac-kind">本厂</span>
             <span class="tag hl">${esc(o.values.factory) || "未指定"}</span>
             ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('mainLog')">＋ 打卡</button>` : ""}</div>
           ${canProdLog ? mainSubAddBoxHtml(o.id, "mainLog", "本厂生产进度（补充说明，选填）…") : ""}
@@ -1080,11 +1481,11 @@ function vDetail() {
     <button class="btn danger ghost block" onclick="A.delOrder('${o.id}')">删除此订单</button></div></section>` : ""}`;
 }
 
-/* ---------- 打卡记录（按订单分组，组内按时间倒序） ---------- */
-const LOG_GROUP_PREVIEW = 5;   // 每个订单默认只显示最近几条，记录多了不用一直往下滚
+// ---------- 打卡记录（按订单分组） ----------
+const LOG_GROUP_PREVIEW = 5;  // 每组默认显示的条数
 function logListHtml(rows) {
-  if (!rows) return `<div class="empty">加载中…</div>`;
-  if (!rows.length) return `<div class="empty">还没有打卡记录</div>`;
+  if (!rows) return `<div class="card"><div class="empty">加载中…</div></div>`;
+  if (!rows.length) return `<div class="card"><div class="empty">还没有打卡记录</div></div>`;
   const groups = [];
   const byOrder = new Map();
   rows.forEach(r => {
@@ -1098,7 +1499,7 @@ function logListHtml(rows) {
     const expanded = expandedLogGroups.has(g.orderId);
     const visible = expanded ? g.items : g.items.slice(0, LOG_GROUP_PREVIEW);
     const hidden = g.items.length - visible.length;
-    return `<div class="card" style="margin-bottom:14px">
+    return `<div class="card log-group">
     <div class="lf-head" style="padding:11px 16px 0">
       <a href="javascript:void(0)" onclick="go('detail','${g.orderId}')">${esc(g.styleNo || "")} ${esc(g.styleName || "")}</a>
       <span class="cnt right">共 ${g.items.length} 条</span></div>
@@ -1111,7 +1512,7 @@ function logListHtml(rows) {
   }).join("");
 }
 
-/* ---------- 聊天 ---------- */
+// ---------- 聊天 ----------
 const avatarHtml = (name, cls) => `<span class="avatar ${cls || ""}">${esc((name || "?").slice(0, 1))}</span>`;
 function contactsHtml() {
   const list = state.chat.contacts;
@@ -1123,19 +1524,18 @@ function contactsHtml() {
         ${c.last ? `<span class="c-time num">${fmtT(c.last.t)}</span>` : ""}</div>
       <div class="c-last">${c.last ? (c.last.fromMe ? "我：" : "") + esc(c.last.text) : "打个招呼吧"}</div>
     </div>
-    ${c.unread ? `<span class="badge">${c.unread > 99 ? "99+" : c.unread}</span>` : `<span class="chev">›</span>`}
+    ${badgeHtml(c.unread) || `<span class="chev">›</span>`}
   </div>`).join("");
 }
 function attachmentHtml(a, mine) {
   if (!a) return "";
-  // 跟订单里的照片用同一个大图查看器，也一样支持双指缩放/双击还原
   if (a.isImage) return `<img class="b-img" src="${esc(a.url)}" alt="${esc(a.name)}"
     data-gallery='${JSON.stringify([a.url])}' data-i="0" onclick="A.lightboxFromEl(this)">`;
   return `<a class="b-file" href="${esc(a.url)}" target="_blank" rel="noopener" download="${esc(a.name)}"
     style="${mine ? "color:#fff" : ""}"><span class="fi">📄</span>
     <span><span class="fn">${esc(a.name)}</span><br><span class="fs num">${fmtSize(a.size)}</span></span></a>`;
 }
-// 时间只在间隔超过 5 分钟时单独显示一行，不再每条气泡都挂时间
+// 间隔超过 5 分钟才显示时间
 function chatTimeLabel(t) {
   const d = new Date(t), n = new Date(), p = x => String(x).padStart(2, "0");
   const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -1178,16 +1578,15 @@ function vChat() {
     </div></div>`;
 }
 
-/* ---------- 管理员查看某员工打卡 ---------- */
+// ---------- 员工打卡记录 ----------
 function vStaffLogs() {
   const u = userById(route.id);
   return `<section class="group">
     <div class="group-title">${esc(u ? u.name : "")} 的打卡记录${state.myLogs ? ` · 共 ${state.myLogs.length} 条` : ""}</div>
-    <div class="card">${logListHtml(state.myLogs)}</div></section>`;
+    <div class="log-groups">${logListHtml(state.myLogs)}</div></section>`;
 }
 
-/* ---------- 管理后台 ---------- */
-// 权限开关的文案：给管理员看的话，不能是 editProd 这种内部名字
+// ---------- 管理后台 ----------
 const PERM_LABELS = [
   ["editOrder",   "改「一、订单明细」",      "货号、款式、数量、交期、工厂这些字段"],
   ["editProd",    "改「二、生产明细」",      "指定下厂员、加工点、发货日期"],
@@ -1196,15 +1595,6 @@ const PERM_LABELS = [
   ["createOrder", "新建 / 导入订单",         ""],
   ["inspect",     "验货问题与整改",          ""]
 ];
-// 某个职位当前生效的权限：没配过就按模板默认（跟服务端 permsOf 同一套规则）
-function permsOfRole(r) {
-  const base = TEMPLATE_PERMS[r.template] || TEMPLATE_PERMS.follower;
-  if (!r.perms) return base;
-  const out = Object.assign({}, base);
-  if (r.perms.scope === "all" || r.perms.scope === "own") out.scope = r.perms.scope;
-  PERM_KEYS.forEach(k => { if (typeof r.perms[k] === "boolean") out[k] = r.perms[k]; });
-  return out;
-}
 const TEMPLATE_LABEL = { sales: "业务员", follower: "下厂员", supervisor: "主管" };
 
 function adminPeopleHtml() {
@@ -1224,7 +1614,7 @@ function adminPeopleHtml() {
     <div class="group-title">员工账号 · 共 ${allStaff.length} 人</div>
     <div class="card"><div class="card-pad" style="padding-bottom:0">
       <input class="in" id="admin-user-kw" placeholder="搜索姓名" value="${esc(adminUserFilt.kw)}" oninput="A.setAdminUserKw(this.value)">
-    </div><div class="tbl-wrap"><table class="tbl">
+    </div><div class="tbl-wrap"><table class="tbl stack">
       <tr><th>姓名</th><th>手机号</th><th>职位</th><th>操作</th></tr>
       ${pageStaff.map(u => `<tr>
         <td style="white-space:nowrap">${esc(u.name)}${u.id === me().id ? ` <span class="tag">我</span>` : ""}</td>
@@ -1258,9 +1648,8 @@ function adminPermsHtml() {
   return `<section class="group a-roles">
     <div class="group-title">职位</div>
     <div class="card"><div class="card-pad">
-      <div class="chip-wall">${state.roles.map(r => `<span class="tag role">${esc(r.label)}
-        · ${TEMPLATE_LABEL[r.template] || "下厂员"}权限${r.core ? "" :
-          ` <a href="javascript:void(0)" onclick="A.delRole('${r.k}')" style="margin-left:4px">✕</a>`}</span>`).join("")}</div></div>
+      <div class="chip-wall">${state.roles.map(r => chipHtml(`${r.label} · ${TEMPLATE_LABEL[r.template] || "下厂员"}权限`,
+        r.core ? "" : `A.delRole('${r.k}')`)).join("")}</div></div>
       <label class="field"><span>新职位名称</span><input class="in" id="nr-label" placeholder="例：跟单主管"></label>
       <label class="field"><span>权限模板</span><select class="in" id="nr-template">
         <option value="sales">业务员权限（管自己创建/负责的订单）</option>
@@ -1298,8 +1687,7 @@ function adminFormHtml() {
     <div class="card cf-split">
       <div class="cf-lists">${["order", "production"].map(s => `<div class="card-pad" style="padding-bottom:6px">
         <div class="row-sub" style="margin-bottom:6px">${s === "order" ? "一、订单明细" : "二、生产明细"}</div>
-        <div class="chip-wall">${state.fields[s].map(f => `<span class="tag role">${esc(f.label)}${
-          f.core ? "" : ` <a href="javascript:void(0)" onclick="A.delField('${s}','${f.k}')" style="margin-left:4px">✕</a>`}</span>`).join("")}</div></div>`).join("")}</div>
+        <div class="chip-wall">${state.fields[s].map(f => chipHtml(f.label, f.core ? "" : `A.delField('${s}','${f.k}')`)).join("")}</div></div>`).join("")}</div>
       <div class="cf-form">
       <label class="field"><span>添加到板块</span><select class="in" id="cf-sec"><option value="order">一、订单明细</option><option value="production">二、生产明细</option></select></label>
       <label class="field"><span>字段名称</span><input class="in" id="cf-label" placeholder="例：吊牌进度"></label>
@@ -1315,8 +1703,7 @@ function adminFormHtml() {
     <div class="card">${[["fabric", "面料工厂"], ["emb", "绣花/印花工厂"], ["prod", "服装工厂"]].map(([k, t]) => `
       <div class="card-pad" style="padding-bottom:10px">
         <div class="row-sub" style="margin-bottom:6px">${t}</div>
-        <div class="chip-wall">${state.factories[k].map(x =>
-          `<span class="tag role">${esc(x)} <a href="javascript:void(0)" onclick="A.delFactory('${k}','${encodeURIComponent(x)}')" style="margin-left:4px">✕</a></span>`).join("")}</div>
+        <div class="chip-wall">${state.factories[k].map(x => chipHtml(x, `A.delFactory('${k}','${encodeURIComponent(x)}')`)).join("")}</div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <input class="in" id="fac-${k}" placeholder="新工厂名"><button class="btn mini ghost" onclick="A.addFactory('${k}')">添加</button></div></div>`).join("")}</div>
   </section>
@@ -1324,8 +1711,7 @@ function adminFormHtml() {
   <section class="group a-seasons">
     <div class="group-title">季节</div>
     <div class="card"><div class="card-pad">
-      <div class="chip-wall">${state.seasons.map(s => `<span class="tag role">${esc(s)}
-        <a href="javascript:void(0)" onclick="A.delSeason('${encodeURIComponent(s)}')" style="margin-left:4px">✕</a></span>`).join("")}</div></div>
+      <div class="chip-wall">${state.seasons.map(s => chipHtml(s, `A.delSeason('${encodeURIComponent(s)}')`)).join("")}</div></div>
       <label class="field"><span>新季节名称</span><input class="in" id="ns-name" placeholder="例：SS2029"></label>
       <div class="btn-row"><button class="btn" onclick="A.addSeason()">添加季节</button></div></div>
   </section>`;
@@ -1338,13 +1724,12 @@ function adminDataHtml() {
       <p class="row-sub" style="margin:0 0 12px">导出订单全部内容（订单基本信息、生产进度、验货问题、跟单小结）为 Excel(.xlsx) 文件，照片直接嵌在表格里</p>
       <label class="field" style="padding-left:0;padding-right:0;border:0"><span>按季节筛选（可选）</span>
         <select class="in" id="exp-season"><option value="">全部季节</option>${
-          state.seasons.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></label>
-      <button class="btn" onclick="A.exportData()">导出订单数据</button></div></div>
+          seasonOptions("").map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></label>
+      <button class="btn" id="exp-btn" onclick="A.exportData()"><span class="btn-spin" aria-hidden="true"></span><span>导出订单数据</span></button>
+      <p class="row-sub" style="margin:10px 0 0">文件会交给浏览器下载；在微信里打开本系统时无法下载，请先用浏览器打开</p></div></div>
   </section>`;
 }
 
-// 管理页原来是七个板块平铺一条长滚动，人员/权限/表单配置/数据导出全混在一起。
-// 归成四组，一次只看一组，找东西不用再从头翻到尾。
 const ADMIN_TABS = [["people", "人员"], ["perms", "权限"], ["form", "表单配置"], ["data", "数据"]];
 function vAdmin() {
   if (!isAdmin()) return `<div class="card"><div class="empty">仅管理员可访问</div></div>`;
@@ -1357,16 +1742,17 @@ function vAdmin() {
   ${body}`;
 }
 
-/* ---------- 消息通知 ---------- */
+// ---------- 消息通知 ----------
 function vNotifs() {
   const list = state.notifs.list;
   return `<section class="group">
     <div class="group-title">订单动态${list ? ` · 共 ${list.length} 条` : ""}</div>
     <div class="card notif-list">${notifItemsHtml()}</div>
+    ${(list || []).some(x => x.read) ? `<div class="btn-row"><button class="btn plain block" onclick="A.clearReadNotifs()">清空已读通知</button></div>` : ""}
   </section>`;
 }
 
-/* ---------- 我的 ---------- */
+// ---------- 我的 ----------
 function vAccount() {
   const m = me();
   return `<section class="group">
@@ -1387,31 +1773,30 @@ function vAccount() {
   <section class="group">
     <div class="group-title">修改密码</div>
     <div class="card">
-      <label class="field"><span>新密码</span><input class="in" type="password" id="my-p1"></label>
-      <label class="field"><span>确认新密码</span><input class="in" type="password" id="my-p2"></label>
+      <label class="field"><span>新密码</span><input class="in" type="password" id="my-p1" autocomplete="new-password"></label>
+      <label class="field"><span>确认新密码</span><input class="in" type="password" id="my-p2" autocomplete="new-password"></label>
       <div class="btn-row"><button class="btn" onclick="A.changeMyPw()">确认修改</button></div></div>
   </section>
 
   <section class="group">
     <div class="group-title">我的打卡记录${state.myLogs ? ` · 共 ${state.myLogs.length} 条` : ""}</div>
-    <div class="card">${logListHtml(state.myLogs)}</div>
+    <div class="log-groups">${logListHtml(state.myLogs)}</div>
   </section>
 
   ${pushSectionHtml()}
 
   <section class="group">
     <div class="btn-row" style="padding-left:0;padding-right:0">
-      ${(isStandalone() || !isMobileDevice()) ? "" : `<button class="btn ghost block" style="margin-bottom:10px" onclick="A.install()">📲 安装到手机</button>`}
+      ${canOfferInstall() ? `<button class="btn ghost block" style="margin-bottom:10px" onclick="A.install()">📲 安装到手机</button>` : ""}
       <button class="btn danger ghost block" onclick="A.logout()">退出登录</button></div>
   </section>`;
 }
 
-// 「消息通知」开关：分四种情况给不同的话术，别让员工看着一个不能用的开关猜为什么
 function pushSectionHtml() {
   const iosNeedsInstall = isIOSDevice() && !isStandalone();
   let body;
   if (iosNeedsInstall) {
-    // iOS 的硬限制：只有"添加到主屏幕"后的图标打开才收得到，Safari 标签页里申请权限都申请不了
+    // iOS 只有从主屏图标打开才能收通知
     body = `<div class="row-item"><div class="row-main">
         <div class="row-label">需要先安装到手机</div>
         <div class="row-sub">iPhone 上只有从主屏幕图标打开，才能收到系统通知</div></div></div>
@@ -1429,8 +1814,7 @@ function pushSectionHtml() {
         <div class="row-label">已开启</div>
         <div class="row-sub">订单更新、同事发消息，App 没打开也会提醒你</div></div>
         <span class="tag ok">开启中</span></div>
-      <div class="btn-row"><button class="btn ghost" onclick="A.testPush()">发送测试通知</button>
-        <button class="btn danger ghost" onclick="A.disablePush()">关闭通知</button></div>`;
+      <div class="btn-row"><button class="btn danger ghost" onclick="A.disablePush()">关闭通知</button></div>`;
   } else {
     body = `<div class="row-item"><div class="row-main">
         <div class="row-label">未开启</div>
@@ -1441,7 +1825,13 @@ function pushSectionHtml() {
     <div class="card">${body}</div></section>`;
 }
 
-/* ================= 动作 ================= */
+function inspItemOf(oid, gid, itemId) {
+  const o = state.orders.find(x => x.id === oid);
+  const g = o && o.inspections.find(x => x.id === gid);
+  return g && g.items.find(x => x.id === itemId);
+}
+
+// ================= 动作 =================
 const A = {
   modalOk() {
     const st = modalState; if (!st) return;
@@ -1452,56 +1842,63 @@ const A = {
   },
   modalCancel() { modalState = null; renderModal(); },
 
-  /* ---- 照片 ---- */
-  async addDraftPhotos(ctx, input) {
+  // ---------- 照片 ----------
+  addDraftPhotos(ctx, input) {
     const files = [...(input.files || [])]; input.value = "";
+    A.queuePhotos(ctx, files);
+  },
+  queuePhotos(ctx, files) {
     if (!files.length) return;
     photoDraft[ctx] = photoDraft[ctx] || [];
-    let okCount = 0, failCount = 0;
-    for (let k = 0; k < files.length; k++) {
-      toast(`上传照片 ${k + 1}/${files.length}…`, true);
-      // 手机网络不稳时经常传一半就断，失败了自动重试一次，别一断网就直接算失败
-      let url = null, lastErr = null;
-      for (let attempt = 0; attempt < 2 && !url; attempt++) {
-        try { url = await uploadOnePhoto(files[k]); } catch (e) { lastErr = e; }
-      }
-      if (url) { okCount++; photoDraft[ctx].push(url); const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
-      else failCount++;
-      if (!url && lastErr) console.error("照片上传失败", lastErr);
-    }
-    // 之前不管成功失败最后都提示"照片已添加"，网络不好导致全部失败时也会显示成功，用户会误以为传上去了。
-    // 现在按实际结果给准确提示，一张都没成功时不再假装成功。
-    if (okCount && !failCount) toast("照片已添加");
-    else if (okCount && failCount) toast(`已添加${okCount}张，${failCount}张上传失败(请检查网络后重试)`);
-    else toast("照片上传失败，请检查网络后重试");
+    const pend = photoPending[ctx] = photoPending[ctx] || [];
+    const imgs = files.filter(looksLikeImage);
+    const room = Math.max(0, PHOTO_MAX_PER_PICKER - photoDraft[ctx].length - pend.length);
+    if (imgs.length < files.length) toast("已跳过不是图片的文件");
+    else if (imgs.length > room) toast(`每处最多 ${PHOTO_MAX_PER_PICKER} 张，多出的 ${imgs.length - room} 张没有添加`);
+    imgs.slice(0, room).forEach(file => {
+      const it = { id: ++photoSeq, status: "wait", pct: 0, file };
+      pend.push(it); processPhoto(ctx, it);
+    });
+    if (!pend.length) delete photoPending[ctx];
+    repaintPicker(ctx);
+  },
+  retryPhoto(ctx, id) {
+    const it = (photoPending[ctx] || []).find(x => x.id === id);
+    if (!it || it.status !== "err") return;
+    it.status = "wait"; it.err = ""; processPhoto(ctx, it);
+  },
+  cancelPhoto(ctx, id) {
+    const pend = photoPending[ctx] || [], k = pend.findIndex(x => x.id === id);
+    if (k < 0) return;
+    const it = pend[k]; it.removed = true;
+    if (it.xhr) it.xhr.abort();
+    if (it.preview) URL.revokeObjectURL(it.preview);
+    pend.splice(k, 1);
+    flushPending(ctx);  // 前面卡住的删掉后，后面传完的可以落位
   },
   removeDraftPhoto(ctx, i) {
-    if (photoDraft[ctx]) { photoDraft[ctx].splice(i, 1); const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
+    if (photoDraft[ctx]) { photoDraft[ctx].splice(i, 1); repaintPicker(ctx); }
   },
   lightboxFromEl(el) {
-    try { lightbox = { photos: JSON.parse(el.getAttribute("data-gallery")), i: +el.getAttribute("data-i") || 0 }; renderLightbox(); }
-    catch (e) {}
+    let photos;
+    try { photos = JSON.parse(el.getAttribute("data-gallery")); } catch (e) { return; }
+    openLightbox(photos, +el.getAttribute("data-i") || 0, el.getBoundingClientRect ? el.getBoundingClientRect() : null);
   },
-  lbStep(d) {
-    if (!lightbox) return;
-    const n = lightbox.photos.length;
-    lightbox.i = (lightbox.i + d + n) % n; renderLightbox();
-  },
-  closeLightbox() { lightbox = null; renderLightbox(); },
+  lbStep(d) { lbGo(d); },
+  closeLightbox(dir, vy) { closeLightboxNow(dir || 0, vy || 0, false); },
 
   async login() {
     const phone = $("lg-phone").value.trim(), password = $("lg-pass").value;
     try {
       const r = await api("POST", "/login", { phone, password });
       state.token = r.token; localStorage.setItem("daka_token", r.token);
-      showWelcome = true; render();   // 密码验证通过就先顶上欢迎界面，不用等 bootstrap 接口回来
+      showWelcome = true; render();  // 先顶上欢迎界面，不等 bootstrap
       await Promise.all([refresh(), new Promise(res => setTimeout(res, 1500))]);
       go("orders");
       A.dismissWelcome();
       A.refreshUnread(); A.refreshNotifUnread();
     } catch (e) {
-      // 只有「密码对了但 bootstrap 接口失败」才需要把已经顶上的欢迎界面收回去；
-      // 单纯密码错误时 showWelcome 还是 false，不用重渲染，否则会把用户刚输入的手机号也清空
+      // 只有 bootstrap 失败才收回欢迎界面；密码错误不重画，免得清空输入
       if (showWelcome) { showWelcome = false; render(); }
       toast((e && e.error) || "登录失败");
     }
@@ -1510,7 +1907,7 @@ const A = {
     if (!showWelcome) return;
     showWelcome = false; render();
   },
-  /* ---- 系统推送 ---- */
+  // ---------- 系统推送 ----------
   async enablePush() {
     try {
       const perm = await Notification.requestPermission();
@@ -1518,13 +1915,12 @@ const A = {
       if (perm !== "granted") { render(); return toast(perm === "denied" ? "已拒绝通知权限" : "没有开启通知"); }
       const reg = await navigator.serviceWorker.ready;
       const { publicKey } = await api("GET", "/push/key");
-      // 已有订阅就直接复用（换了密钥的情况极少，真出现了浏览器会报错，下面 catch 里兜住）
       const sub = (await reg.pushManager.getSubscription())
         || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(publicKey) });
       const r = await api("POST", "/push/subscribe", { subscription: sub.toJSON() });
       pushState.on = true; pushState.devices = r.devices || 1;
       render();
-      toast("已开启，可以点「发送测试通知」验证一下");
+      toast("已开启通知");
     } catch (e) {
       console.error(e);
       toast((e && e.error) || "开启失败，请换个浏览器或稍后再试");
@@ -1542,13 +1938,9 @@ const A = {
       toast("已关闭通知");
     } catch (e) { toast("关闭失败"); }
   },
-  async testPush() {
-    try { await api("POST", "/push/test"); toast("已发送，稍等一下看手机通知栏"); }
-    catch (e) { toast((e && e.error) || "发送失败"); }
-  },
 
   setAdminTab(t) { adminTab = t; render(); window.scrollTo(0, 0); },
-  // 权限开关是即改即生效的：改完立刻落库，不留"未保存"这种中间状态让人记挂
+  // 权限开关即改即存
   async setRolePerm(roleKey, key, value) {
     const r = state.roles.find(x => x.k === roleKey); if (!r) return;
     const perms = Object.assign({}, permsOfRole(r), r.perms || {});
@@ -1556,22 +1948,19 @@ const A = {
     await run(() => api("PATCH", `/roles/${roleKey}/perms`, { perms }), "已保存");
   },
   async resetRolePerms(roleKey) {
-    modal({
-      title: "恢复默认权限", body: "这个职位的权限将恢复成所属模板的默认配置。",
-      okText: "恢复", danger: true,
-      onOk: () => run(() => api("PATCH", `/roles/${roleKey}/perms`, { perms: null }), "已恢复默认")
-    });
+    confirmDanger("恢复默认权限", "这个职位的权限将恢复成所属模板的默认配置。",
+      () => run(() => api("PATCH", `/roles/${roleKey}/perms`, { perms: null }), "已恢复默认"), "恢复");
   },
 
   async install() {
     if (isStandalone()) return toast("已经是从主屏打开的了");
-    if (deferredInstall) {                      // 安卓 / 桌面 Chrome：直接弹系统安装框
+    if (deferredInstall) {
       deferredInstall.prompt();
       try { await deferredInstall.userChoice; } catch (e) {}
       deferredInstall = null;
       return;
     }
-    A.installGuide();                           // iOS 等：给图文步骤
+    A.installGuide();  // iOS 等给图文步骤
   },
   installGuide() {
     const ua = navigator.userAgent || "";
@@ -1597,8 +1986,7 @@ const A = {
       okText: "知道了", onOk: () => A.modalCancel() });
   },
   logout() {
-    modal({ title: "退出登录？", body: "下次需要重新输入手机号和密码。", danger: true, okText: "退出",
-      onOk: () => A.forceLogout() });
+    confirmDanger("退出登录？", "下次需要重新输入手机号和密码。", () => A.forceLogout(), "退出");
   },
   forceLogout() {
     state.token = null; state.me = null; localStorage.removeItem("daka_token"); localStorage.removeItem(STATE_CACHE_KEY);
@@ -1612,8 +2000,7 @@ const A = {
   },
 
   openDate(el) {
-    // 原生日期框只有点在日历图标那一小块才会自动弹选择器，点日期数字部分只是把光标定位过去，
-    // 不会弹出来——不管点在控件哪里都强制弹一次，避免用户以为点了没反应
+    // 点在日期数字上也强制弹选择器
     try { if (el.showPicker) el.showPicker(); } catch (e) { }
   },
   syncDateLabel(id) {
@@ -1621,22 +2008,19 @@ const A = {
     lab.textContent = el.value ? fmtDate(el.value) : "选择日期";
     lab.classList.toggle("empty", !el.value);
   },
-  // 订单交期/发货日期等日期字段：不用进编辑页，详情页里直接点选就改，PATCH 是合并语义(只传这一个字段)
   async quickSetDate(oid, key, val) {
     await run(() => api("PATCH", "/orders/" + oid, { values: { [key]: val } }), "已更新");
   },
   clearShipDate(oid) {
-    modal({ title: "清空发货日期？", body: "清空后这个字段会解锁，可以重新选择发货日期。",
-      danger: true, okText: "确认清空",
-      onOk: () => run(() => api("PATCH", "/orders/" + oid, { values: { shipDate: "" } }), "发货日期已清空") });
+    confirmDanger("清空发货日期？", "清空后这个字段会解锁，可以重新选择发货日期。",
+      () => run(() => api("PATCH", "/orders/" + oid, { values: { shipDate: "" } }), "发货日期已清空"), "确认清空");
   },
   syncFileName(id, name) {
     const el = $(id + "--name"); if (el) el.textContent = name || "未选择文件";
   },
 
   setF(k, v) { filt[k] = v; render(); },
-  // 概览卡片点击：筛出对应的订单；再点一次(或点「订单总数」)取消筛选。
-  // 不在订单列表页时先跳回订单列表，这样在任何页面点卡片都能直接看到结果。
+  // 不在订单页时先跳回订单页
   setStatFilter(kind) {
     const already = kind === "recent" ? filt.recent : filt.ship === kind;
     if (kind === "all" || already) { filt.ship = ""; filt.recent = false; }
@@ -1644,34 +2028,13 @@ const A = {
     else { filt.ship = kind; filt.recent = false; }
     if (route.v !== "orders") go("orders"); else { render(); window.scrollTo(0, 0); }
   },
-  // 桌面端顶部条的全局搜索：跟订单列表里的关键词筛选是同一个 filt.kw，输入时自动切到订单列表
-  setDeskKw(v) {
-    filt.kw = v; clearTimeout(A._dkT);
-    A._dkT = setTimeout(() => {
-      if (route.v !== "orders") go("orders"); else render();
-      const inp = $("dh-kw");
-      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
-    }, 300);
-  },
-  setAdminUserKw(v) {
-    adminUserFilt.kw = v; adminUserFilt.page = 1; clearTimeout(A._auT);
-    A._auT = setTimeout(() => {
-      render();
-      const inp = $("admin-user-kw");
-      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
-    }, 300);
-  },
+  // 桌面顶部搜索与列表共用 filt.kw
+  setDeskKw(v) { filt.kw = v; rerenderKeepFocus("dh-kw", () => { if (route.v !== "orders") go("orders"); else render(); }); },
+  setAdminUserKw(v) { adminUserFilt.kw = v; adminUserFilt.page = 1; rerenderKeepFocus("admin-user-kw"); },
   setAdminUserPage(p) { adminUserFilt.page = p; render(); },
-  setFKw(v) {
-    filt.kw = v; clearTimeout(A._kwT);
-    A._kwT = setTimeout(() => {
-      render();
-      const inp = $("flt-kw");
-      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
-    }, 300);
-  },
+  setFKw(v) { filt.kw = v; rerenderKeepFocus("flt-kw"); },
   collectScalars(section, into) {
-    for (const f of state.fields[section].filter(f => f.type !== "log")) {
+    for (const f of scalarFields(section)) {
       if (f.type === "image") { into[f.k] = photoDraft.img || []; continue; }
       const el = $("nf-" + f.k); if (!el) continue;
       if (isMultiFactory(f)) { try { into[f.k] = JSON.parse(el.value || "[]"); } catch (e) { into[f.k] = []; } continue; }
@@ -1692,11 +2055,12 @@ const A = {
   rerenderFactoryField(id, arr) {
     const container = document.querySelector(`.multifactory[data-id="${CSS.escape(id)}"]`); if (!container) return;
     const fKey = id.replace(/^(nf-|imp\d+-)/, "");
-    const f = [...state.fields.order, ...state.fields.production].find(x => x.k === fKey);
+    const f = allFieldDefs().find(x => x.k === fKey);
     if (!f) return;
     container.outerHTML = factoryMultiHtml(f, arr, id);
   },
   async createOrder() {
+    if (photosBlocked("img")) return;
     const season = ($("nf-season").value || "").trim();
     if (!season) return toast("请选择订单季节");
     const values = {}; A.collectScalars("order", values); A.collectScalars("production", values);
@@ -1706,6 +2070,7 @@ const A = {
   },
   toggleBasic() {
     editingBasic = !editingBasic;
+    resetPhotoPending();
     if (editingBasic) { const o = state.orders.find(x => x.id === route.id); photoDraft = { img: normalizePhotos(o && o.values.img) }; }
     else photoDraft = {};
     render();
@@ -1715,17 +2080,19 @@ const A = {
     render();
   },
   async saveBasic(oid) {
+    if (photosBlocked("img")) return;
     const season = ($("nf-season") || {}).value || "";
     const values = {}; A.collectScalars("order", values); A.collectScalars("production", values);
     await run(() => api("PATCH", "/orders/" + oid, { season, values }).then(() => { editingBasic = false; editingFollower = false; photoDraft = {}; }), "已保存修改");
   },
   delOrder(oid) {
-    modal({ title: "删除此订单？", body: "删除后不可恢复，订单下的全部打卡记录一并删除。", danger: true, okText: "确认删除",
-      onOk: () => run(() => api("DELETE", "/orders/" + oid).then(() => go("orders")), "订单已删除") });
+    confirmDanger("删除此订单？", "删除后不可恢复，订单下的全部打卡记录一并删除。",
+      () => run(() => api("DELETE", "/orders/" + oid).then(() => go("orders")), "订单已删除"));
   },
 
   toggleAdd(key) { const b = $("add-" + key); if (b) b.classList.toggle("show"); },
   async addLog(oid, key) {
+    if (photosBlocked("log:" + key)) return;
     const el = $("txt-" + key), text = ((el && el.value) || "").trim();
     const photos = photoDraft["log:" + key] || [];
     const body = { key, text, photos };
@@ -1744,79 +2111,72 @@ const A = {
       : key.startsWith("sub:") ? ((o.subs.find(s => s.id === key.slice(4)) || {}).log || [])
       : (o.logs[key] || []);
     const e = list.find(x => x.id === eid); if (!e) return;
-    modal({ title: "修改打卡内容", input: "textarea", value: e.text, okText: "保存",
-      onOk: v => { if (v && v.trim()) run(() => api("PATCH", `/orders/${oid}/logs/${key}/${eid}`, { text: v.trim() }), "已修改"); } });
+    askText({ title: "修改打卡内容", input: "textarea", value: e.text, okText: "保存" },
+      t => run(() => api("PATCH", `/orders/${oid}/logs/${key}/${eid}`, { text: t }), "已修改"));
   },
   delLog(oid, key, eid) {
-    modal({ title: "删除这条打卡记录？", danger: true, okText: "确认删除",
-      onOk: () => run(() => api("DELETE", `/orders/${oid}/logs/${key}/${eid}`), "已删除") });
+    confirmDanger("删除这条打卡记录？", "", () => run(() => api("DELETE", `/orders/${oid}/logs/${key}/${eid}`), "已删除"));
   },
 
-  /* ---- 生产进度：动态加工点 ---- */
+  // ---------- 加工点 ----------
   addSubPrompt(oid) {
-    modal({ title: "添加加工点", body: "给这个加工点起个名字，比如「绣花外发点」「二次印花点」。", input: "text", okText: "添加",
-      onOk: v => { const name = (v || "").trim(); if (name) run(() => api("POST", `/orders/${oid}/subs`, { name }), "已添加加工点：" + name); } });
+    askText({ title: "添加加工点", body: "给这个加工点起个名字，比如「绣花外发点」「二次印花点」。", okText: "添加" },
+      name => run(() => api("POST", `/orders/${oid}/subs`, { name }), "已添加加工点：" + name));
   },
   renameSub(oid, subId) {
     const o = state.orders.find(x => x.id === oid);
     const sub = o && o.subs.find(x => x.id === subId);
     if (!sub) return;
-    modal({ title: "修改加工点名称", input: "text", value: sub.name, okText: "保存",
-      onOk: v => { const name = (v || "").trim(); if (name) run(() => api("PATCH", `/orders/${oid}/subs/${subId}`, { name }), "已修改"); } });
+    askText({ title: "修改加工点名称", value: sub.name, okText: "保存" },
+      name => run(() => api("PATCH", `/orders/${oid}/subs/${subId}`, { name }), "已修改"));
   },
   delSub(oid, subId) {
-    modal({ title: "删除这个加工点？", body: "删除后该加工点下的打卡记录一并删除，且不可恢复。", danger: true, okText: "确认删除",
-      onOk: () => run(() => api("DELETE", `/orders/${oid}/subs/${subId}`), "已删除") });
+    confirmDanger("删除这个加工点？", "删除后该加工点下的打卡记录一并删除，且不可恢复。",
+      () => run(() => api("DELETE", `/orders/${oid}/subs/${subId}`), "已删除"));
   },
 
-  /* ---- 验货：发现问题(业务员) / 整改情况(下厂员) 各自独立 ---- */
+  // ---------- 验货 ----------
   inspAddRow() {
     const d = document.createElement("label"); d.className = "field";
     d.innerHTML = `<span>发现问题</span><textarea class="in insp-p" style="min-height:62px"></textarea>`;
     $("insp-items").appendChild(d);
   },
   async saveInsp(oid) {
+    if (photosBlocked("insp")) return;
     const problems = [...document.querySelectorAll(".insp-p")].map(t => t.value.trim()).filter(Boolean);
     const photos = photoDraft.insp || [];
     if (!problems.length && !photos.length) return toast("请至少填写一条发现的问题或加照片");
     await run(() => api("POST", `/orders/${oid}/inspections`, { problems, photos }).then(() => { delete photoDraft.insp; }), "验货记录已保存");
   },
   delInsp(oid, gid) {
-    modal({ title: "删除这组验货记录？", danger: true, okText: "确认删除",
-      onOk: () => run(() => api("DELETE", `/orders/${oid}/inspections/${gid}`), "已删除") });
+    confirmDanger("删除这组验货记录？", "", () => run(() => api("DELETE", `/orders/${oid}/inspections/${gid}`), "已删除"));
   },
   editInspProblem(oid, gid, itemId) {
-    const o = state.orders.find(x => x.id === oid);
-    const g = o && o.inspections.find(x => x.id === gid);
-    const it = g && g.items.find(x => x.id === itemId);
-    if (!it) return;
-    modal({ title: "修改发现的问题", input: "textarea", value: it.problem, okText: "保存",
-      onOk: v => { if (v && v.trim()) run(() => api("PATCH", `/orders/${oid}/inspections/${gid}/items/${itemId}`, { problem: v.trim() }), "已修改"); } });
+    const it = inspItemOf(oid, gid, itemId); if (!it) return;
+    askText({ title: "修改发现的问题", input: "textarea", value: it.problem, okText: "保存" },
+      t => run(() => api("PATCH", `/orders/${oid}/inspections/${gid}/items/${itemId}`, { problem: t }), "已修改"));
   },
   editInspFix(oid, gid, itemId) {
-    const o = state.orders.find(x => x.id === oid);
-    const g = o && o.inspections.find(x => x.id === gid);
-    const it = g && g.items.find(x => x.id === itemId);
-    if (!it) return;
+    const it = inspItemOf(oid, gid, itemId); if (!it) return;
     modal({ title: "填写整改情况", input: "textarea", value: it.fix || "", okText: "保存",
       onOk: v => run(() => api("PATCH", `/orders/${oid}/inspections/${gid}/items/${itemId}`, { fix: (v || "").trim() }), "已保存") });
   },
   addInspNote(oid, gid, itemId) {
-    modal({ title: "添加补充说明", input: "textarea", okText: "添加",
-      onOk: v => { if (v && v.trim()) run(() => api("POST", `/orders/${oid}/inspections/${gid}/items/${itemId}/notes`, { text: v.trim() }), "已添加"); } });
+    askText({ title: "添加补充说明", input: "textarea", okText: "添加" },
+      text => run(() => api("POST", `/orders/${oid}/inspections/${gid}/items/${itemId}/notes`, { text }), "已添加"));
   },
   async addFollow(oid) {
+    if (photosBlocked("follow")) return;
     const text = ($("txt-follow").value || "").trim();
     const photos = photoDraft.follow || [];
     if (!text && !photos.length) return toast("请填写内容或加照片");
     await run(() => api("POST", `/orders/${oid}/follow`, { text, photos }).then(() => { delete photoDraft.follow; }), "已添加");
   },
   delFollow(oid, eid) {
-    modal({ title: "删除这条记录？", danger: true, okText: "确认删除",
-      onOk: () => run(() => api("DELETE", `/orders/${oid}/follow/${eid}`), "已删除") });
+    confirmDanger("删除这条记录？", "", () => run(() => api("DELETE", `/orders/${oid}/follow/${eid}`), "已删除"));
   },
 
-  /* ---- 管理后台 ---- */
+  // ---------- 管理后台 ----------
   async addUser() {
     const name = $("nu-name").value.trim(), phone = $("nu-phone").value.trim(),
       role = $("nu-role").value, password = $("nu-pass").value || "123456";
@@ -1829,13 +2189,13 @@ const A = {
   },
   deleteUser(id) {
     const u = userById(id); if (!u) return;
-    modal({ title: `删除员工「${u.name}」？`, body: "删除后该账号无法登录；历史打卡记录仍会保留。此操作不可恢复。",
-      danger: true, okText: "确认删除", onOk: () => run(() => api("DELETE", "/users/" + id), "已删除员工：" + u.name) });
+    confirmDanger(`删除员工「${u.name}」？`, "删除后该账号无法登录；历史打卡记录仍会保留。此操作不可恢复。",
+      () => run(() => api("DELETE", "/users/" + id), "已删除员工：" + u.name));
   },
   resetUserPw(id) {
     const u = userById(id); if (!u) return;
-    modal({ title: `为 ${u.name} 设置新密码`, input: "text", value: "123456", okText: "重置",
-      onOk: v => { if (v && v.trim()) run(() => api("POST", `/users/${id}/reset-password`, { password: v.trim() }), "密码已重置"); } });
+    askText({ title: `为 ${u.name} 设置新密码`, value: "123456", okText: "重置" },
+      password => run(() => api("POST", `/users/${id}/reset-password`, { password }), "密码已重置"));
   },
   async addRole() {
     const label = $("nr-label").value.trim(), template = $("nr-template").value;
@@ -1844,8 +2204,7 @@ const A = {
   },
   delRole(k) {
     const r = state.roles.find(x => x.k === k); if (!r) return;
-    modal({ title: `删除职位「${r.label}」？`, body: "只有没人担任该职位时才能删除。", danger: true, okText: "确认删除",
-      onOk: () => run(() => api("DELETE", "/roles/" + k), "职位已删除") });
+    confirmDanger(`删除职位「${r.label}」？`, "只有没人担任该职位时才能删除。", () => run(() => api("DELETE", "/roles/" + k), "职位已删除"));
   },
   async addSeason() {
     const name = $("ns-name").value.trim();
@@ -1854,8 +2213,7 @@ const A = {
   },
   delSeason(encName) {
     const name = decodeURIComponent(encName);
-    modal({ title: `删除季节「${name}」？`, body: "只有没有订单使用该季节时才能删除。", danger: true, okText: "确认删除",
-      onOk: () => run(() => api("DELETE", "/seasons/" + encName), "季节已删除") });
+    confirmDanger(`删除季节「${name}」？`, "只有没有订单使用该季节时才能删除。", () => run(() => api("DELETE", "/seasons/" + encName), "季节已删除"));
   },
   async addField() {
     const section = $("cf-sec").value, label = $("cf-label").value.trim(), type = $("cf-type").value;
@@ -1865,8 +2223,7 @@ const A = {
   },
   delField(section, key) {
     const f = state.fields[section].find(x => x.k === key); if (!f) return;
-    modal({ title: `删除字段「${f.label}」？`, body: "已填写的数据将不再显示。", danger: true, okText: "确认删除",
-      onOk: () => run(() => api("DELETE", `/fields/${section}/${key}`), "字段已删除") });
+    confirmDanger(`删除字段「${f.label}」？`, "已填写的数据将不再显示。", () => run(() => api("DELETE", `/fields/${section}/${key}`), "字段已删除"));
   },
   async addFactory(kind) {
     const name = $("fac-" + kind).value.trim(); if (!name) return;
@@ -1886,7 +2243,7 @@ const A = {
   },
   viewStaffLogs(id) { go("staffLogs", id); },
 
-  /* ---- 聊天 ---- */
+  // ---------- 聊天 ----------
   async loadContacts(silent) {
     try {
       const list = await api("GET", "/chat/contacts");
@@ -1915,9 +2272,7 @@ const A = {
     const fd = new FormData(); fd.append("file", file);
     toast("正在上传…");
     try {
-      const r = await fetch("/api/chat/upload", { method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd });
-      const j = await r.json(); if (!r.ok) throw j;
-      state.chat.att = j; input.value = ""; render();
+      state.chat.att = await xhrUpload("/api/chat/upload", fd); input.value = ""; render();
       const box = $("chat-msgs"); if (box) box.scrollTop = box.scrollHeight;
       toast("附件已就绪，点发送");
     } catch (e) { toast((e && e.error) || "上传失败"); }
@@ -1961,7 +2316,7 @@ const A = {
     } catch (e) { }
   },
 
-  /* ---- 应用内通知：跟聊天未读一个套路，同一个定时器里轮询未读数 ---- */
+  // ---------- 应用内通知 ----------
   async refreshNotifUnread() {
     try {
       const r = await api("GET", "/notifications/unread-count");
@@ -1981,7 +2336,7 @@ const A = {
     if (state.notifs.open) A.loadNotifs();
   },
   closeNotifPanel() { state.notifs.open = false; render(); },
-  // 点一条通知：标记已读 + 跳到对应订单（订单已被删掉时就留在通知列表里）
+  // 标记已读并跳到订单（订单已删则留在原页）
   async openNotif(id, orderId) {
     state.notifs.open = false;
     const n = (state.notifs.list || []).find(x => x.id === id);
@@ -1993,6 +2348,24 @@ const A = {
     if (orderId && state.orders.some(o => o.id === orderId)) go("detail", orderId);
     else { render(); if (orderId) toast("这张订单已经不在了"); }
   },
+  async deleteNotif(id) {
+    try {
+      await api("DELETE", `/notifications/${id}`);
+      const n = (state.notifs.list || []).find(x => x.id === id);
+      if (n && !n.read) state.notifs.unread = Math.max(0, state.notifs.unread - 1);
+      state.notifs.list = (state.notifs.list || []).filter(x => x.id !== id);
+      render();
+    } catch (e) { toast((e && e.error) || "删除失败"); }
+  },
+  clearReadNotifs() {
+    confirmDanger("清空已读通知？", "只删除你自己已读过的通知，未读的会保留。", async () => {
+      try {
+        await api("DELETE", "/notifications?read=1");
+        state.notifs.list = (state.notifs.list || []).filter(x => !x.read);
+        render(); toast("已清空已读通知");
+      } catch (e) { toast((e && e.error) || "操作失败"); }
+    }, "清空");
+  },
   async markAllNotifsRead() {
     try {
       await api("POST", "/notifications/read-all");
@@ -2002,56 +2375,107 @@ const A = {
     } catch (e) { toast((e && e.error) || "操作失败"); }
   },
 
+  // 导出：先取一次性下载链接，交给浏览器下载。
+  // 微信等内置浏览器给指引和可复制链接；iPhone 主屏 App 交给 Safari；其它直接下载
   async exportData() {
     if (!isAdmin()) return toast("仅管理员可导出");
-    // 照片多的时候要等一会儿，期间再点不会重复发请求（以前连点几次会叠着导出好几份）
-    if (A.exportData.busy) return toast("正在导出，请稍候…", true);
+    if (A.exportData.busy) return;
+    const btn = $("exp-btn");
     A.exportData.busy = true;
-    toast("正在导出，照片多时需要等一会儿…", true);
+    if (btn) { btn.disabled = true; btn.classList.add("is-busy"); }
     try {
       const season = ($("exp-season") || {}).value || "";
-      const qs = season ? "?season=" + encodeURIComponent(season) : "";
-      const r = await fetch("/api/export" + qs, { headers: { Authorization: "Bearer " + state.token } });
-      if (!r.ok) throw await r.json().catch(() => ({ error: "导出失败" }));
-      const blob = await r.blob(), url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `订单导出-${season || "全部季节"}-${todayStr()}.xlsx`;
-      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-      toast("已开始下载");
+      const t = await api("POST", "/export/ticket", { season });
+      if (!t.count) return toast(season ? `「${season}」下没有订单` : "还没有订单可导出");
+      const url = new URL(t.url, location.href).href;
+      if (inAppBrowser()) {
+        modal({ title: "请在浏览器里下载", okText: "复制下载链接",
+          body: "微信等 App 里打不开下载。可以点右上角「···」选「在浏览器打开」后重新导出；或者复制下面的链接，粘贴到手机浏览器里打开（5 分钟内有效，只能用一次）。",
+          onOk: () => copyText(url).then(ok => toast(ok ? "链接已复制，去浏览器里粘贴打开" : "复制失败，请用浏览器打开本系统后再导出")) });
+      } else if (isIosStandalone()) {
+        modal({ title: `导出 ${t.count} 单已准备好`, okText: "用 Safari 下载",
+          body: "点下面的按钮会打开 Safari 下载文件，下载好后在「文件」App 的「下载」里能找到。",
+          onOk: () => window.open(url, "_blank") });
+      } else {
+        const a = document.createElement("a");
+        a.href = url; a.download = t.filename; a.rel = "noopener";
+        document.body.appendChild(a); a.click(); a.remove();
+        toast(`开始下载 ${t.count} 单，照片多时文件较大，请留意浏览器的下载提示`);
+      }
     } catch (e) { toast((e && e.error) || "导出失败"); }
-    finally { A.exportData.busy = false; }
+    finally {
+      A.exportData.busy = false;
+      const b2 = $("exp-btn"); if (b2) { b2.disabled = false; b2.classList.remove("is-busy"); }
+    }
   },
 
-  /* ---- 批量导入 ---- */
+  // ---------- 批量导入 ----------
   async importFile(input) {
-    const f = input.files && input.files[0]; if (!f) return;
-    A.syncFileName(input.id, f.name);
-    const btn = input.nextElementSibling;
-    input.disabled = true; if (btn) btn.disabled = true;
+    const f = input.files && input.files[0]; input.value = "";  // 清空后同一文件可再次选择
+    if (f) await A.importFileObj(f);
+  },
+  async importFileObj(f) {
+    if (A.importFileObj.busy) return toast("正在识别上一个文件，请稍候");
+    const ext = (f.name.split(".").pop() || "").toLowerCase();
+    if (!["xlsx", "xls", "csv", "txt"].includes(ext)) return toast("只支持 Excel(.xlsx/.xls) 或 CSV(.csv/.txt) 文件");
+    A.syncFileName("imp-file", f.name);
+    A.importFileObj.busy = true;
+    const btn = document.querySelector(".imp-drop-btn"); if (btn) btn.disabled = true;
     try {
-      const ext = (f.name.split(".").pop() || "").toLowerCase();
-      // .xlsx 直接在浏览器本地把文字解析出来，不用把整份文件（哪怕表格里贴了很多没压缩的原图，
-      // 几十MB）传去服务器——反正只要文字，不处理里面的图片，本地解析完全不用等上传
+      // xlsx 在本地解析，不用上传整份文件
       if (ext === "xlsx") {
         try {
-          if (!window.XLSX) { toast("正在准备中，请稍候…", true); await loadScriptOnce("/xlsx.mini.min.js"); }
+          await ensureXlsx("正在准备中，请稍候…");
           await A.importFileClientSide(f);
           return;
         } catch (e) { console.error("本地解析失败，退回服务器解析：", e); }
       }
       await A.importFileServerFallback(f);
-    } finally { input.disabled = false; if (btn) btn.disabled = false; }
+    } finally { A.importFileObj.busy = false; const b2 = document.querySelector(".imp-drop-btn"); if (b2) b2.disabled = false; }
   },
-  // 本地解析：表格文字在本地直接解出来(不用上传原始文件)；表格里贴的图片也在本地抠出来，
-  // 抠到的图片先在本地压缩(跟平时拍照上传一样)再各自上传，不用把整份大文件传去服务器
+  // 模板表头用当前字段名；第二张表写说明、示例和现有季节/员工
+  async downloadImportTemplate() {
+    if (inAppBrowser()) return toast("微信等 App 里无法下载文件，请用浏览器打开本系统后再下载模板");
+    try {
+      await ensureXlsx("正在生成模板…");
+      const cols = importScalars();
+      const head = ["季节", ...cols.map(f => f.label)];
+      const names = tpl => state.users.filter(u => u.template === tpl).map(u => u.name);
+      const later = new Date(Date.now() + 30 * 86400000), pad = x => String(x).padStart(2, "0");
+      const sampleOf = f => f.k === "styleNo" ? "SS27-T001" : f.k === "styleName" ? "女装印花短袖T恤" : f.k === "qty" ? "1200"
+        : f.type === "date" ? (f.k === "shipDate" ? "" : `${later.getFullYear()}-${pad(later.getMonth() + 1)}-${pad(later.getDate())}`)
+        : f.type === "user-sales" ? (names("sales")[0] || "") : f.type === "user-follower" ? (names("follower")[0] || "")
+        : isMultiFactory(f) ? "工厂A、工厂B" : "";
+      const help = [
+        ["填写说明"],
+        ["1. 在「订单」表里从第二行开始，一行一单；列的顺序可以随便调，用不到的列可以删掉。"],
+        ["2. 货号和款式名至少填一个，其余都可以空着，导入后再补。"],
+        ["3. 日期写成 2026-08-15 或 2026/8/15。发货日期一旦填写就会锁定，没发货前请留空。"],
+        ["4. 业务员、下厂员填员工姓名，要跟下面名单里的字完全一样。"],
+        ["5. 面料/绣花等可以有多个工厂的，用顿号「、」隔开。"],
+        ["6. 款式图可以直接贴(插入图片)到对应那一行里，导入时会自动带上。"],
+        [], ["示例："], head, [state.seasons[0] || "SS2027", ...cols.map(sampleOf)],
+        [], ["现有季节", ...state.seasons], ["业务员", ...names("sales")], ["下厂员", ...names("follower")]
+      ];
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet([head]);
+      ws["!cols"] = head.map(h => ({ wch: Math.max(10, String(h).length * 2 + 4) }));
+      XLSX.utils.book_append_sheet(wb, ws, "订单");
+      const hs = XLSX.utils.aoa_to_sheet(help); hs["!cols"] = [{ wch: 14 }, ...head.slice(1).map(() => ({ wch: 14 }))];
+      XLSX.utils.book_append_sheet(wb, hs, "填写说明");
+      XLSX.writeFile(wb, "订单导入模板.xlsx");
+      toast("模板已开始下载");
+    } catch (e) { toast("模板生成失败，请稍后再试"); }
+  },
+  // 本地解析文字，并抠出表格图片压缩后上传
   async importFileClientSide(f) {
     toast("正在本地解析文件…", true);
     const buf = await f.arrayBuffer();
-    // XLSX.read 的 type:"array" 要求传字节数组(Uint8Array)，直接传原始 ArrayBuffer 会静默解析出空结果
+    // type:"array" 必须传 Uint8Array
     const wb = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true, dateNF: "yyyy-mm-dd" });
     const ws = wb.Sheets[wb.SheetNames[0]];
     if (!ws) throw new Error("表格里没有内容");
-    // WPS 导出的表格声明的数据范围经常比实际数据大很多，收紧成实际有数据的范围再读
+    // WPS 声明的范围常比实际大，按实际数据收紧
     let minR = Infinity, maxR = -Infinity, minC = Infinity, maxC = -Infinity;
     Object.keys(ws).forEach(addr => {
       if (addr[0] === "!") return;
@@ -2069,10 +2493,10 @@ const A = {
     toast("正在识别表格里的图片…", true);
     const found = await extractEmbeddedImagesClient(buf);
     const rowImages = {};
-    // 图片一张张排队上传太慢(压缩+上传的时间会累加)，改成同时传几张(并发3张)，网络等待的时间能重叠起来
+    // 图片并发 3 张上传
     const entries = Object.keys(found)
       .map(origRow => ({ filteredIdx: origToFiltered[origRow], img: found[origRow] }))
-      .filter(e => e.filteredIdx !== undefined && e.img.data.length <= 8 * 1024 * 1024); // 跟平时拍照上传的单张图片大小上限保持一致
+      .filter(e => e.filteredIdx !== undefined && e.img.data.length <= 8 * 1024 * 1024);
     if (entries.length) {
       let done = 0;
       toast(`正在上传图片…（0/${entries.length}）`, true);
@@ -2095,91 +2519,104 @@ const A = {
     toast("解析完成");
     A.showPreview(A.rowsToPreview(rows, rowImages), Object.keys(rowImages).length ? "，已自动识别表格里的款式图" : "");
   },
-  // 服务器解析：本地不支持(比如很老的机型加载不了解析组件)或本地解析出问题时的兜底
+  // 本地解析失败时交给服务器
   async importFileServerFallback(f) {
-    // 用 XHR 而不是 fetch，是因为要拿到真实上传进度、并能设超时——
-    // 不然网络卡住时界面只会一直显示"请稍候"，用户分不清是真在传还是已经死了
     try {
-      const j = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", "/api/import/parse");
-        xhr.setRequestHeader("Authorization", "Bearer " + state.token);
-        xhr.timeout = 180000; // 3分钟，超过多半是网络问题，不能让用户无限期干等
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable && e.total) {
-            const pct = Math.round(e.loaded / e.total * 100);
-            toast(pct < 100 ? `正在上传文件… ${pct}%` : "上传完成，正在解析…", true);
-          } else toast("正在上传文件，请稍候…", true);
-        };
-        xhr.onload = () => {
-          let j2 = null; try { j2 = JSON.parse(xhr.responseText); } catch (e) {}
-          if (xhr.status >= 200 && xhr.status < 300 && j2) resolve(j2);
-          else reject((j2 && j2.error) ? j2 : { error: "文件解析失败(状态码 " + xhr.status + ")" });
-        };
-        xhr.onerror = () => reject({ error: "网络出错，上传失败，请检查网络后重试" });
-        xhr.ontimeout = () => reject({ error: "上传超过3分钟没有完成，可能是网络太慢或文件太大，请检查网络后重试" });
-        const fd = new FormData(); fd.append("file", f);
-        xhr.send(fd);
-      });
+      const fd = new FormData(); fd.append("file", f);
+      const j = await xhrUpload("/api/import/parse", fd, { timeout: 180000, onProgress: p =>
+        toast(p == null ? "正在上传文件，请稍候…" : p < 1 ? `正在上传文件… ${Math.round(p * 100)}%` : "上传完成，正在解析…", true) });
       importRaw = "";
       const gotImages = j.rowImages && Object.keys(j.rowImages).length;
       toast("解析完成");
       A.showPreview(A.rowsToPreview(j.rows, j.rowImages), (j.encoding === "GBK" ? "（已按 GBK 编码读取）" : "") + (gotImages ? "，已自动识别表格里的款式图" : ""));
     } catch (e) { toast((e && e.error) || "文件解析失败"); }
   },
-  // 表头列名 -> 字段
+  // 表头 -> 字段：认系统字段名和常见别名/旧表头
   importMap() {
-    return { "货号": "styleNo", "款式名": "styleName", "款式": "style", "数量": "qty", "款式描述": "desc",
-      "订单交期": "deadline", "交期": "deadline", "发货日期": "shipDate", "业务员": "sales", "下厂员": "follower",
-      "季节": "_season", "订单季节": "_season",
-      "服装工厂": "factory", "生产厂": "factory", // 生产厂 是旧表头，兼容老导入模板
-      "面料工厂1": "fabricFactory1", "面料工厂2": "fabricFactory2", "面料工厂": "fabricFactory1", // 面料工厂 是旧表头，导入进面料工厂1
-      "绣花工厂": "embFactory", "印花工厂": "printFactory", "绣印工厂": "embFactory" }; // 绣印工厂 是旧表头，兼容老导入模板
+    const m = {}, known = new Set(importScalars().map(f => f.k));
+    importScalars().forEach(f => { m[normHeader(f.label)] = f.k; });
+    const alias = {
+      "货号": "styleNo", "款号": "styleNo", "款式编号": "styleNo", "款式名": "styleName", "款名": "styleName", "品名": "styleName",
+      "款式": "style", "数量": "qty", "件数": "qty", "订单数量": "qty", "下单数量": "qty", "款式描述": "desc", "描述": "desc",
+      "订单交期": "deadline", "交期": "deadline", "交货期": "deadline", "交货日期": "deadline", "货期": "deadline",
+      "发货日期": "shipDate", "出货日期": "shipDate", "业务员": "sales", "业务": "sales", "下厂员": "follower", "跟单员": "follower",
+      "季节": "_season", "订单季节": "_season", "季度": "_season",
+      "服装工厂": "factory", "生产厂": "factory", "加工厂": "factory",  // 旧表头
+      "面料工厂1": "fabricFactory1", "面料工厂2": "fabricFactory2", "面料工厂": "fabricFactory1", "面料厂": "fabricFactory1",
+      "绣花工厂": "embFactory", "绣花厂": "embFactory", "印花工厂": "printFactory", "印花厂": "printFactory", "绣印工厂": "embFactory"
+    };
+    Object.keys(alias).forEach(h => {
+      const k = normHeader(h);
+      if (!m[k] && (alias[h] === "_season" || known.has(alias[h]))) m[k] = alias[h];
+    });
+    return m;
   },
-  // 二维数组（首行表头）-> 待确认的订单列表
+  // 二维数组(首行表头) -> 待确认订单，warn 为需要用户确认的问题
   rowsToPreview(grid, rowImages) {
     const MAP = A.importMap();
-    // 找表头行：前 10 行里第一行"含已知列名"的行（容忍标题行/空行在上面）
+    // 表头行：前 10 行里第一行含已知列名的
     let hi = 0;
     for (let i = 0; i < Math.min(grid.length, 10); i++) {
-      const cs = (grid[i] || []).map(c => String(c == null ? "" : c).trim());
-      if (cs.some(c => MAP[c])) { hi = i; break; }
+      if ((grid[i] || []).some(c => MAP[normHeader(c)])) { hi = i; break; }
     }
-    const heads = (grid[hi] || []).map(h => String(h == null ? "" : h).trim().replace(/^\uFEFF/, ""));
+    const rawHeads = (grid[hi] || []).map(h => String(h == null ? "" : h).trim().replace(/^\uFEFF/, ""));
+    const keys = rawHeads.map(h => MAP[normHeader(h)] || null);
+    importUnknownCols = rawHeads.filter((h, j) => h && !keys[j]);
+    const fieldOf = {}; importScalars().forEach(f => { fieldOf[f.k] = f; });
     const out = [];
     for (let i = hi + 1; i < grid.length; i++) {
       const cells = grid[i] || [];
       if (!cells.some(c => String(c == null ? "" : c).trim())) continue;
-      const values = {}; let season = "";
-      heads.forEach((h, j) => {
-        const key = MAP[h], v = String(cells[j] == null ? "" : cells[j]).trim();
+      const values = {}, warn = []; let season = "";
+      keys.forEach((key, j) => {
+        const v = String(cells[j] == null ? "" : cells[j]).trim();
         if (!v || !key) return;
-        if (key === "_season") season = v;
-        else if (key === "sales" || key === "follower") {
-          const u = state.users.find(x => x.name === v);
-          if (u) values[key] = u.id;
-        } else {
-          const f = [...state.fields.order, ...state.fields.production].find(x => x.k === key);
-          if (f && f.type === "date") values[key] = normalizeImportDate(v);
-          else if (f && isMultiFactory(f)) values[key] = v.split(/[,，、\/]/).map(s => s.trim()).filter(Boolean);
-          else values[key] = v;
+        if (key === "_season") {
+          season = v;
+          if (!(state.seasons || []).includes(v)) warn.push(`季节「${v}」不在后台的季节列表里`);
+          return;
         }
+        const f = fieldOf[key];
+        if (key === "sales" || key === "follower") {
+          const u = state.users.find(x => x.name === v && x.template === key) || state.users.find(x => x.name === v);
+          if (u) values[key] = u.id;
+          else warn.push(`${f ? f.label : key}「${v}」不在员工名单里，请在下面手动选择`);
+          return;
+        }
+        if (f && f.type === "date") {
+          const d = normalizeImportDate(v);
+          if (d) values[key] = d; else warn.push(`${f.label}「${v}」不是能识别的日期，请在下面手动选择`);
+        } else if (f && isMultiFactory(f)) values[key] = v.split(/[,，、\/;；]/).map(x => x.trim()).filter(Boolean);
+        else values[key] = v;
       });
       if (!values.styleNo && !values.styleName) continue;
+      if (values.qty && !/^\d+(\.\d+)?$/.test(String(values.qty).replace(/[,，\s]/g, ""))) warn.push(`数量「${values.qty}」不是纯数字，合计数量时不会算进去`);
+      if (!season) warn.push("没有填季节，请在下面选择（不选会归到「未分季」）");
       if (me().template === "sales" && !values.sales) values.sales = me().id;
-      if (rowImages && rowImages[i]) values.img = [rowImages[i]]; // WPS/Excel 表格里嵌入的款式图，按行号配对带出来
-      out.push({ season: season || "", values });
+      if (rowImages && rowImages[i]) values.img = [rowImages[i]];  // 表格里嵌的款式图
+      out.push({ season, values, warn });
     }
+    // 重复检查：表格内重复，或系统里已有同货号(季节都有时要相同)；只能比对自己看得到的订单
+    const keyOf = r => String(r.values.styleNo || "").trim().toUpperCase();
+    const cnt = {}; out.forEach(r => { const k = keyOf(r); if (k) cnt[k] = (cnt[k] || 0) + 1; });
+    out.forEach(r => {
+      const k = keyOf(r); if (!k) return;
+      if (cnt[k] > 1) r.warn.push(`货号 ${r.values.styleNo} 在表格里出现了 ${cnt[k]} 次`);
+      const ex = state.orders.find(o => String(o.values.styleNo || "").trim().toUpperCase() === k && (!r.season || !o.season || o.season === r.season));
+      if (ex) r.warn.push(`系统里已经有货号 ${r.values.styleNo} 的订单${ex.season ? `（${ex.season}）` : ""}，可能是重复导入`);
+    });
     return out;
   },
   showPreview(rows, extra) {
     if (!rows.length) return toast("未识别到有效数据，请检查表头列名");
     importPreview = rows; A.resyncImportPhotoDrafts(); render();
-    toast(`识别到 ${rows.length} 单${extra || ""}，已填入下方表单，可修改后确认导入`);
+    const w = rows.filter(r => r.warn && r.warn.length).length;
+    toast(`识别到 ${rows.length} 单${extra || ""}${w ? `，其中 ${w} 单需要确认` : ""}，请在下方核对后导入`);
+    const first = document.querySelector(".imp-summary"); if (first && first.scrollIntoView) first.scrollIntoView({ behavior: "smooth", block: "start" });
   },
-  // 导入预览里每行的款式图草稿：按 importPreview 当前的下标重建，避免"移除某一行"后下标错位串图
+  // 按当前行号重建每行的款式图草稿
   resyncImportPhotoDrafts() {
-    Object.keys(photoDraft).forEach(k => { if (/^imp\d+-img$/.test(k)) delete photoDraft[k]; });
+    clearImportPhotoDrafts();
     (importPreview || []).forEach((r, i) => { photoDraft["imp" + i + "-img"] = normalizePhotos(r.values.img); });
   },
   importText() {
@@ -2222,6 +2659,8 @@ const A = {
     });
   },
   removeImportRow(i) {
+    // 照片没传完不能删行，否则行号错位串图
+    if (photosBlocked(/^imp\d+-img$/)) return;
     A.syncImportInputs(); if (!importPreview) return;
     importPreview.splice(i, 1); if (!importPreview.length) importPreview = null;
     A.resyncImportPhotoDrafts();
@@ -2229,28 +2668,36 @@ const A = {
   },
   cancelImport() {
     importPreview = null;
-    Object.keys(photoDraft).forEach(k => { if (/^imp\d+-img$/.test(k)) delete photoDraft[k]; });
+    clearImportPhotoDrafts();
     render(); toast("已取消，未导入任何数据");
   },
   async confirmImport() {
     if (!importPreview || !importPreview.length) return;
+    if (photosBlocked(/^imp\d+-img$/)) return;
     A.syncImportInputs();
     const built = importPreview.filter(r => r.values.styleNo || r.values.styleName)
       .map(r => ({ season: r.season || "未分季", values: r.values }));
     if (!built.length) return toast("每一单请至少填写货号或款式名");
+    if (built.length > 500) return toast("一次最多导入 500 单，请把表格拆开分批导入");
+    // 按修改后的值再查一次重复，有重复先确认
+    const dup = built.filter(r => r.values.styleNo && state.orders.some(o =>
+      String(o.values.styleNo || "").trim().toUpperCase() === String(r.values.styleNo).trim().toUpperCase() && o.season === r.season)).length;
+    if (dup && !A.confirmImport.forced) {
+      return modal({ title: `有 ${dup} 单可能重复`, okText: "仍然全部导入",
+        body: `这 ${dup} 单的货号和季节跟系统里已有的订单一样，可能是同一份表导入了两次。可以先取消、在预览里把重复的移除。`,
+        onOk: () => { A.confirmImport.forced = true; A.confirmImport().finally(() => { A.confirmImport.forced = false; }); } });
+    }
     try {
       const r = await api("POST", "/orders/import", { orders: built });
       importPreview = null; importRaw = "";
-      Object.keys(photoDraft).forEach(k => { if (/^imp\d+-img$/.test(k)) delete photoDraft[k]; });
+      clearImportPhotoDrafts();
       await refresh(); go("orders"); toast(`成功导入 ${r.imported} 个订单`);
     } catch (e) { toast((e && e.error) || "导入失败"); }
   }
 };
 
-/* ================= 下拉刷新 ================= */
-// 在页面顶部往下拉可以强制刷新一次数据，不用退出重进；不额外画指示器，
-// 刷新完成后用跟其它操作一样的 toast 提示一下就行。聊天单聊里、大图查看器打开时、
-// 弹窗打开时不生效，避免跟那些地方自己的手势/滚动冲突
+// ================= 下拉刷新 =================
+// 页面顶部下拉刷新数据；单聊、大图、弹窗打开时不生效
 (function setupPullRefresh() {
   const THRESHOLD = 62;
   let startY = null, dragging = false, dist = 0, refreshing = false;
@@ -2276,16 +2723,45 @@ const A = {
   });
 })();
 
-/* ================= 启动 ================= */
+// ================= 拖放 / 粘贴（电脑） =================
+// 图片拖进或粘贴到照片框(粘贴进最近点过的那个)；表格文件拖到导入区
+(function setupPhotoDropPaste() {
+  let lastCtx = null;
+  const gridOf = t => t && t.closest ? t.closest(".photos-grid[data-ctx]") : null;
+  const impOf = t => t && t.closest ? t.closest('[data-drop="import"]') : null;
+  document.addEventListener("pointerdown", e => { const g = gridOf(e.target); if (g) lastCtx = g.dataset.ctx; }, true);
+  document.addEventListener("dragover", e => {
+    e.preventDefault();  // 阻止浏览器直接打开拖进来的文件
+    const g = gridOf(e.target) || impOf(e.target); if (g) g.classList.add("drop");
+  });
+  document.addEventListener("dragleave", e => { const g = gridOf(e.target) || impOf(e.target); if (g && !g.contains(e.relatedTarget)) g.classList.remove("drop"); });
+  document.addEventListener("drop", e => {
+    e.preventDefault();
+    const g = gridOf(e.target), imp = impOf(e.target);
+    document.querySelectorAll(".photos-grid.drop, .imp-drop.drop").forEach(x => x.classList.remove("drop"));
+    const files = e.dataTransfer ? [...e.dataTransfer.files] : [];
+    if (g) { lastCtx = g.dataset.ctx; A.queuePhotos(g.dataset.ctx, files); }
+    else if (imp && files[0]) A.importFileObj(files[0]);
+  });
+  document.addEventListener("paste", e => {
+    const files = [...((e.clipboardData && e.clipboardData.files) || [])].filter(looksLikeImage);
+    if (!files.length) return;
+    const grids = [...document.querySelectorAll(".photos-grid[data-ctx]")].filter(g => g.offsetParent);
+    const g = grids.find(x => x.dataset.ctx === lastCtx) || (grids.length === 1 ? grids[0] : null);
+    if (!g) return;
+    e.preventDefault(); A.queuePhotos(g.dataset.ctx, files);
+  });
+})();
+
+// ================= 启动 =================
 window.go = go; window.A = A;
 window.addEventListener("beforeinstallprompt", (e) => {
-  e.preventDefault(); deferredInstall = e;      // 存起来，等用户点「安装到手机」再弹
+  e.preventDefault(); deferredInstall = e;  // 等用户点「安装到手机」再弹
   if (state.me || !$("app").innerHTML) { /* 下次渲染时按钮自然出现 */ }
 });
 window.addEventListener("appinstalled", () => { deferredInstall = null; toast("已添加到手机主屏"); });
 
-// 点系统通知进来时 URL 上带着 ?order=xxx / ?chat=xxx，直接跳到对应页面。
-// 处理完把参数从地址栏抹掉，免得之后刷新又莫名其妙跳一次。
+// 从系统通知进来(?order= / ?chat=)时直接跳转，并清掉参数
 function openFromPush() {
   try {
     const q = new URLSearchParams(location.search);
@@ -2298,14 +2774,12 @@ function openFromPush() {
 }
 
 (async function boot() {
-  // 每次打开App、只要本来是登录状态，都要过一遍欢迎界面（logo/公司名称/跟单系统）。
-  // index.html 里已经有一份静态的欢迎界面兜底，JS 跑起来之前手机屏幕就不会是空的；
-  // 这里只需要在数据没回来之前维持住同一份内容，不要提前露出正在加载的空页面。
+  // 已登录时先展示欢迎界面(index.html 里有静态的一份)，数据回来前不露出空页面
   if (state.token) {
-    loadStateCache();   // 先用上次缓存的数据把订单/用户列表填上，不用干等网络才有内容
+    loadStateCache();  // 先用缓存数据填上
     showWelcome = true; render();
     const refreshP = refresh().catch(e => { state.token = null; localStorage.removeItem("daka_token"); showWelcome = false; });
-    // 欢迎界面至少展示1.5秒；网络数据这期间基本已经回来了，两者谁慢等谁，不再叠加着算
+    // 欢迎界面至少 1.5 秒，跟网络请求并行
     await Promise.all([refreshP, new Promise(r => setTimeout(r, 1500))]);
   }
   render();
