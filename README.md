@@ -156,7 +156,13 @@ server/
   index.js    Express 启动、静态资源、SPA 兜底
   db.js       SQLite 建表与演示数据
   auth.js     密码哈希、JWT、登录中间件、权限判定
-  routes.js   全部 API 路由
+  routes/     全部 API 路由，按功能一个文件（index.js 负责按顺序挂载）
+    session.js 登录、启动数据、改密码      users.js     员工账号、历史打卡
+    settings.js 字段 / 工厂 / 季节 / 职位   orders.js    订单、打卡记录、加工点、验货
+    chat.js    私聊和附件                  notifications.js 应用内通知、推送订阅
+    uploads.js 照片上传                    import.js / export.js 批量导入 / 导出
+    helpers.js 多个文件共用的辅助函数
+  push.js     系统推送投递
 public/
   index.html  页面骨架，按顺序引入 js/ 下的脚本
   styles.css  样式（韩式蓝，支持深色模式）

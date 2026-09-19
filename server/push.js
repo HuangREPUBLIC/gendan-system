@@ -1,5 +1,5 @@
 "use strict";
-/* 系统推送(Web Push)：只管投递，谁该收到由 routes.js 决定。
+/* 系统推送(Web Push)：只管投递，谁该收到由 routes/ 里各接口决定。
  * iOS 需添加到主屏幕、微信内不支持、部分安卓不稳定，所以页面内红点轮询仍保留 */
 const fs = require("fs");
 const path = require("path");
