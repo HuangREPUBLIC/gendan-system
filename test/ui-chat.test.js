@@ -2,6 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const { JSDOM, VirtualConsole } = require("jsdom");
+const { loadFrontend } = require("./frontend-loader");
 const BASEU = process.env.BASE_URL || "http://localhost:3000";
 const ROOT = path.join(__dirname, "..", "public");
 const vc = new VirtualConsole(); vc.on("jsdomError", () => {});
@@ -25,9 +26,7 @@ async function apiAs(phone, method, p, body) {
   window.fetch = (u, o) => fetch(new URL(u, BASEU + "/").toString(), o);
   window.FormData = FormData; window.Blob = Blob;
   window.URL.createObjectURL = () => "blob:x"; window.URL.revokeObjectURL = () => {};
-  const sc = doc.createElement("script");
-  sc.textContent = fs.readFileSync(ROOT + "/app.js", "utf8");
-  doc.body.appendChild(sc);
+  loadFrontend(window);
   await sleep(300);
   const app = () => doc.getElementById("app").innerHTML;
   const mask = () => doc.getElementById("mask");
@@ -395,9 +394,7 @@ async function apiAs(phone, method, p, body) {
   win2.fetch = (u, o) => fetch(new URL(u, BASEU + "/").toString(), o);
   win2.FormData = FormData; win2.Blob = Blob; win2.URL.createObjectURL = () => "blob:x"; win2.URL.revokeObjectURL = () => {};
   win2.localStorage.setItem("daka_token", freshToken);
-  const sc2 = win2.document.createElement("script");
-  sc2.textContent = fs.readFileSync(ROOT + "/app.js", "utf8");
-  win2.document.body.appendChild(sc2);
+  loadFrontend(win2);
   await sleep(100);
   ok(win2.eval("showWelcome") && win2.document.getElementById("app").innerHTML.includes("跟单系统"),
     "重新打开已登录的App，JS 接管后欢迎界面依然在(不会中间掉一下空白)");

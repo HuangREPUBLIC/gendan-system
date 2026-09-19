@@ -1,6 +1,11 @@
 // 改动前端后升级版本号，旧缓存会被清掉
-const CACHE = "daka-v8";
-const SHELL = ["/", "/index.html", "/app.js", "/styles.css",
+const CACHE = "daka-v9";
+const SHELL = ["/", "/index.html", "/styles.css",
+  "/js/state.js", "/js/utils.js", "/js/perms.js", "/js/api.js", "/js/modal.js", "/js/fields.js",
+  "/js/layout.js", "/js/photos.js", "/js/lightbox.js", "/js/auth.js", "/js/order-list.js", "/js/order-new.js",
+  "/js/order-detail.js", "/js/inspection.js", "/js/punch-logs.js", "/js/chat.js", "/js/notifications.js",
+  "/js/admin.js", "/js/import-xlsx.js", "/js/import.js", "/js/account.js", "/js/pwa.js", "/js/pull-refresh.js",
+  "/js/drop-paste.js", "/js/main.js",
   "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {

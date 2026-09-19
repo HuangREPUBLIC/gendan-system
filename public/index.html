@@ -38,7 +38,32 @@
     document.addEventListener("gesturestart", function (e) { e.preventDefault(); }, { passive: false });
     document.addEventListener("dblclick", function (e) { e.preventDefault(); }, { passive: false });
   </script>
-  <script src="/app.js"></script>
+  <!-- 前端脚本：按功能拆分，顺序不能乱（state 最先，main 最后）；改动后要同步 sw.js 里的缓存清单 -->
+  <script src="/js/state.js"></script>
+  <script src="/js/utils.js"></script>
+  <script src="/js/perms.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/modal.js"></script>
+  <script src="/js/fields.js"></script>
+  <script src="/js/layout.js"></script>
+  <script src="/js/photos.js"></script>
+  <script src="/js/lightbox.js"></script>
+  <script src="/js/auth.js"></script>
+  <script src="/js/order-list.js"></script>
+  <script src="/js/order-new.js"></script>
+  <script src="/js/order-detail.js"></script>
+  <script src="/js/inspection.js"></script>
+  <script src="/js/punch-logs.js"></script>
+  <script src="/js/chat.js"></script>
+  <script src="/js/notifications.js"></script>
+  <script src="/js/admin.js"></script>
+  <script src="/js/import-xlsx.js"></script>
+  <script src="/js/import.js"></script>
+  <script src="/js/account.js"></script>
+  <script src="/js/pwa.js"></script>
+  <script src="/js/pull-refresh.js"></script>
+  <script src="/js/drop-paste.js"></script>
+  <script src="/js/main.js"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {

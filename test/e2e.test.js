@@ -1,5 +1,6 @@
 const fs = require("fs");
 const { JSDOM, VirtualConsole } = require("jsdom");
+const { loadFrontend } = require("./frontend-loader");
 // jsdom 未实现 window.scrollTo 等，属正常现象，静音掉避免干扰测试输出
 const vc = new VirtualConsole();
 vc.on("jsdomError", () => {});
@@ -17,9 +18,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   window.fetch = (u, o) => fetch(new URL(u, BASEU + "/").toString(), o);
   window.FormData = FormData; window.Blob = Blob; window.URL.createObjectURL = () => "blob:x";
   window.URL.revokeObjectURL = () => {};
-  const sc = doc.createElement("script");
-  sc.textContent = fs.readFileSync(ROOT + "/app.js", "utf8");
-  doc.body.appendChild(sc);
+  loadFrontend(window);
   await sleep(300);
   const app = () => doc.getElementById("app").innerHTML;
   const A = window.A;

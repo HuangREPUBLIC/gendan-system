@@ -1,5 +1,6 @@
 /** PWA 静态资源检查：manifest / service worker / 图标 / iOS meta */
 const BASE = (process.env.BASE_URL || "http://localhost:3000");
+const { frontendScripts } = require("./frontend-loader");
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log("PASS " + n); } else { fail++; console.log("FAIL " + n); } };
 (async () => {
@@ -24,6 +25,13 @@ const ok = (c, n) => { if (c) { pass++; console.log("PASS " + n); } else { fail+
   ok(sw.status === 200 && (sw.headers.get("cache-control") || "").includes("no-cache"), "sw.js 可取且不缓存");
   const swText = await sw.text();
   ok(/url\.pathname\.startsWith\("\/api"\)/.test(swText), "SW 不缓存 API（数据始终走网络）");
+
+  // 前端脚本拆成多个文件：每个都要能取到，并登记进离线缓存清单，否则手机离线时打不开
+  const scripts = frontendScripts();
+  ok(scripts.length > 0 && scripts.every(s => s.startsWith("/js/")), "index.html 引用的前端脚本都在 /js/ 下（共 " + scripts.length + " 个）");
+  const codes = await Promise.all(scripts.map(s => fetch(BASE + s).then(r => r.status)));
+  ok(codes.every(c => c === 200), "前端脚本全部能取到");
+  ok(scripts.every(s => swText.includes('"' + s + '"')), "每个前端脚本都登记在 SW 离线缓存清单里");
 
   for (const ic of ["/icon-192.png", "/icon-512.png", "/icon-maskable.png", "/apple-touch-icon.png"]) {
     const r = await fetch(BASE + ic);

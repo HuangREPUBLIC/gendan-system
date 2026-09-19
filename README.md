@@ -158,12 +158,38 @@ server/
   auth.js     密码哈希、JWT、登录中间件、权限判定
   routes.js   全部 API 路由
 public/
-  index.html  页面骨架
-  app.js      前端全部逻辑
+  index.html  页面骨架，按顺序引入 js/ 下的脚本
   styles.css  样式（韩式蓝，支持深色模式）
+  sw.js       Service Worker（离线缓存）
+  js/         前端脚本，按功能一个文件，详见下表
 test/
   run.js      测试入口（临时数据库+随机端口，不影响正式数据）
 ```
+
+### 前端脚本（public/js/）
+
+没有打包工具，就是普通 `<script>` 按 `index.html` 里的顺序依次加载，所有文件共用全局变量。
+页面上的 `onclick="A.xxx()"` 都对应 `A` 上的方法，`A` 在 `state.js` 里创建，各功能文件用 `Object.assign(A, {...})` 把自己的方法挂上去。
+
+| 想改什么 | 看这个文件 |
+|---|---|
+| 全局状态、常量 | `state.js` |
+| 小工具（转义、日期格式、提示条）、请求服务端 | `utils.js`、`api.js` |
+| 谁能看到 / 编辑什么 | `perms.js`（只控制显示，真正的规则在服务端 `auth.js`） |
+| 弹窗、表单里的下拉 / 日期 / 多选工厂 | `modal.js`、`fields.js` |
+| 页面框架：标签栏、电脑端侧栏、跳转 | `layout.js` |
+| 照片选择 / 压缩 / 上传、大图查看器 | `photos.js`、`lightbox.js` |
+| 登录、欢迎页 | `auth.js` |
+| 订单列表 / 新建 / 详情 | `order-list.js`、`order-new.js`、`order-detail.js` |
+| 验货（问题、整改） | `inspection.js` |
+| 打卡记录、聊天、消息通知 | `punch-logs.js`、`chat.js`、`notifications.js` |
+| 管理后台（人员、权限、表单配置、导出） | `admin.js` |
+| 批量导入（读 Excel / 预览确认） | `import-xlsx.js`、`import.js` |
+| 「我的」页、安装到手机 / 系统推送 | `account.js`、`pwa.js` |
+| 下拉刷新、电脑端拖放粘贴 | `pull-refresh.js`、`drop-paste.js` |
+| 启动 | `main.js`（必须最后加载） |
+
+**新增或改名脚本时**：在 `index.html` 里加上（注意顺序），同时登记到 `sw.js` 的 `SHELL` 并把 `CACHE` 版本号加 1，否则手机上会用旧缓存；`npm test` 里有检查，漏了会报错。
 
 ### 数据存储
 
