@@ -82,10 +82,10 @@ function adminPermsHtml() {
             <div class="row-sub">${TEMPLATE_LABEL[r.template] || "下厂员"}模板${r.perms ? " · 已自定义" : " · 默认权限"}</div></div>
           ${r.perms ? `<button class="btn mini ghost" onclick="A.resetRolePerms('${r.k}')">恢复默认</button>` : ""}
         </div>
-        <label class="field"><span>可改/打卡的订单范围（查看不受限，所有人都能看全部订单）</span>
+        <label class="field"><span>看订单范围</span>
           <select class="in" onchange="A.setRolePerm('${r.k}','scope',this.value)">
-            <option value="own" ${p.scope === "own" ? "selected" : ""}>只限自己相关的订单</option>
-            <option value="all" ${p.scope === "all" ? "selected" : ""}>全部订单</option></select></label>
+            <option value="own" ${p.scope === "own" ? "selected" : ""}>只看自己相关的订单</option>
+            <option value="all" ${p.scope === "all" ? "selected" : ""}>看全部订单</option></select></label>
         ${PERM_LABELS.map(([k, name, sub]) => `<label class="perm-row">
           <input type="checkbox" ${p[k] ? "checked" : ""} onchange="A.setRolePerm('${r.k}','${k}',this.checked)">
           <span class="perm-main"><span class="perm-name">${name}</span>${

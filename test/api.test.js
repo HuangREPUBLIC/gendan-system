@@ -64,14 +64,14 @@ async function call(method, path, token, body) {
   ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { shipDate: "2026-09-20" } })).status === 200, "本单负责下厂员能改「二、生产明细」的内容(比如发货日期)");
   ok((await call("PATCH", `/orders/${o1.id}`, wT, { values: { follower: wang.id } })).status === 403, "下厂员不能自己改派「下厂员」这个字段，那算业务员管的事");
 
-  // 订单列表可见范围：所有登录用户都能看全部订单(改/打卡仍只限自己相关的单)
-  const allCount = (await call("GET", "/orders", aT)).j.length;
-  ok((await call("GET", "/orders", sT)).j.length === allCount, "业务员能看到全部订单，包括别人负责的");
+  // 订单列表可见范围：业务员/下厂员只看跟自己相关的，主管/管理员不受限
+  const sList = (await call("GET", "/orders", sT)).j;
+  ok(sList.every(o => o.values.sales === chen.id || o.createdBy === chen.id), "业务员的订单列表里都是自己相关的订单");
   const fList = (await call("GET", "/orders", fT)).j;
-  ok(fList.length === allCount && fList.some(o => o.id === o1.id), "跟 o1 无关的下厂员也能在列表里看到 o1");
-  ok((await call("GET", `/orders/${o1.id}`, fT)).status === 200, "跟本单无关的下厂员能查看这单详情");
+  ok(!fList.some(o => o.id === o1.id), "跟 o1 无关的下厂员，订单列表里看不到 o1");
+  ok((await call("GET", `/orders/${o1.id}`, fT)).status === 403, "跟本单无关的下厂员不能直接查看这单详情");
   ok((await call("GET", `/orders/${o1.id}`, sT)).status === 200, "本单业务员能查看订单详情");
-  ok(allCount === (await call("GET", "/bootstrap", aT)).j.orders.length, "管理员的订单列表不受限，跟 bootstrap 全量一致");
+  ok((await call("GET", "/orders", aT)).j.length === (await call("GET", "/bootstrap", aT)).j.orders.length, "管理员的订单列表不受限，跟 bootstrap 全量一致");
 
   // create order: 任意登录用户仍可建单(建单后自己就是负责人)
   ok((await call("POST", "/orders", fT, { season: "SS2027", values: { styleNo: "X" } })).status === 200, "下厂员能建单");
