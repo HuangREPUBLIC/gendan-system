@@ -21,6 +21,14 @@ const allOrdersPublic = () => loadAllOrders().map(orderPublic);
 const visibleOrdersPublic = u => loadAllOrders().filter(r => A.canViewOrder(u, r)).map(orderPublic);
 const logFields = () => allFields().filter(x => x.type === "log");
 
+// 管理员可选的字段类型；image 只给内置款式图用
+const FIELD_TYPES = ["text", "textarea", "number", "date", "select", "multiselect", "log",
+  "user-staff", "user-any", "user-sales", "user-follower", "factory-prod", "factory-fabric", "factory-emb"];
+// 人员下拉：值存用户 id
+const USER_FIELD_TYPES = ["user-staff", "user-any", "user-sales", "user-follower"];
+// 多选：值存数组
+const MULTI_FIELD_TYPES = ["multiselect", "factory-fabric", "factory-emb"];
+
 // 扩展名按类型白名单决定，不信客户端文件名(防止存成 .html 被同域打开)
 const PHOTO_EXT = { "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp" };
 
@@ -33,4 +41,5 @@ const NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationsh
 const relsXml = rels => XML_HEAD + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
   rels.map(([id, type, target]) => `<Relationship Id="${id}" Type="${NS_REL}/${type}" Target="${target}"/>`).join("") + `</Relationships>`;
 
-module.exports = { getFields, allFields, getFactories, activeUser, activeUsers, orderPublic, loadAllOrders, allOrdersPublic, visibleOrdersPublic, logFields, PHOTO_EXT, XML_HEAD, NS_REL, relsXml };
+module.exports = { getFields, allFields, getFactories, activeUser, activeUsers, orderPublic, loadAllOrders, allOrdersPublic, visibleOrdersPublic, logFields,
+  FIELD_TYPES, USER_FIELD_TYPES, MULTI_FIELD_TYPES, PHOTO_EXT, XML_HEAD, NS_REL, relsXml };

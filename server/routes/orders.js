@@ -4,7 +4,7 @@ const express = require("express");
 const { db, uid } = require("../db");
 const A = require("../auth");
 const P = require("../push");
-const { getFields, allFields, orderPublic, visibleOrdersPublic, logFields } = require("./helpers");
+const { getFields, allFields, orderPublic, visibleOrdersPublic, logFields, USER_FIELD_TYPES } = require("./helpers");
 
 const router = express.Router();
 
@@ -89,7 +89,7 @@ function fieldValueText(key, value) {
   const type = fieldTypeOf(key);
   if (type === "image" || type === "log") return null;
   let s;
-  if (type === "user-sales" || type === "user-follower") {
+  if (USER_FIELD_TYPES.includes(type)) {
     const u = db.prepare("SELECT name FROM users WHERE id = ?").get(value);
     s = u ? u.name : String(value);
   } else if (type === "date") {

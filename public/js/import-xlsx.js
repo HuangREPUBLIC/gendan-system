@@ -137,18 +137,20 @@ Object.assign(A, {
       const later = new Date(Date.now() + 30 * 86400000), pad = x => String(x).padStart(2, "0");
       const sampleOf = f => f.k === "styleNo" ? "SS27-T001" : f.k === "styleName" ? "女装印花短袖T恤" : f.k === "qty" ? "1200"
         : f.type === "date" ? (f.k === "shipDate" ? "" : `${later.getFullYear()}-${pad(later.getMonth() + 1)}-${pad(later.getDate())}`)
-        : f.type === "user-sales" ? (names("sales")[0] || "") : f.type === "user-follower" ? (names("follower")[0] || "")
-        : isMultiFactory(f) ? "工厂A、工厂B" : "";
+        : isUserField(f) ? ((optionsFor(f)[0] || [])[1] || "")
+        : f.type === "multiselect" ? (f.options || []).slice(0, 2).join("、")
+        : isMultiPick(f) ? "工厂A、工厂B" : "";
       const help = [
         ["填写说明"],
         ["1. 在「订单」表里从第二行开始，一行一单；列的顺序可以随便调，用不到的列可以删掉。"],
         ["2. 货号和款式名至少填一个，其余都可以空着，导入后再补。"],
         ["3. 日期写成 2026-08-15 或 2026/8/15。发货日期一旦填写就会锁定，没发货前请留空。"],
-        ["4. 业务员、下厂员填员工姓名，要跟下面名单里的字完全一样。"],
-        ["5. 面料/绣花等可以有多个工厂的，用顿号「、」隔开。"],
+        ["4. 业务员、下厂员等选人的列填员工姓名，要跟下面名单里的字完全一样。"],
+        ["5. 面料/绣花工厂等可以多选的，用顿号「、」隔开。"],
         ["6. 款式图可以直接贴(插入图片)到对应那一行里，导入时会自动带上。"],
         [], ["示例："], head, [state.seasons[0] || "SS2027", ...cols.map(sampleOf)],
-        [], ["现有季节", ...state.seasons], ["业务员", ...names("sales")], ["下厂员", ...names("follower")]
+        [], ["现有季节", ...state.seasons], ["业务员", ...names("sales")], ["下厂员", ...names("follower")],
+        ["全部员工", ...state.users.map(u => u.name)]
       ];
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet([head]);
@@ -270,8 +272,8 @@ Object.assign(A, {
           return;
         }
         const f = fieldOf[key];
-        if (key === "sales" || key === "follower") {
-          const u = state.users.find(x => x.name === v && x.template === key) || state.users.find(x => x.name === v);
+        if (f && isUserField(f)) {
+          const u = state.users.find(x => x.name === v && USER_FIELD_PICK[f.type](x)) || state.users.find(x => x.name === v);
           if (u) values[key] = u.id;
           else warn.push(`${f ? f.label : key}「${v}」不在员工名单里，请在下面手动选择`);
           return;
@@ -279,7 +281,7 @@ Object.assign(A, {
         if (f && f.type === "date") {
           const d = normalizeImportDate(v);
           if (d) values[key] = d; else warn.push(`${f.label}「${v}」不是能识别的日期，请在下面手动选择`);
-        } else if (f && isMultiFactory(f)) values[key] = v.split(/[,，、\/;；]/).map(x => x.trim()).filter(Boolean);
+        } else if (f && isMultiPick(f)) values[key] = v.split(/[,，、\/;；]/).map(x => x.trim()).filter(Boolean);
         else values[key] = v;
       });
       if (!values.styleNo && !values.styleName) continue;

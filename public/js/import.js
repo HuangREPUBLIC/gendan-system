@@ -102,7 +102,7 @@ Object.assign(A, {
       if (img && img.length) r.values.img = img.slice(); else delete r.values.img;
       scal.forEach(f => {
         const el = $("imp" + i + "-" + f.k); if (!el) return;
-        if (isMultiFactory(f)) {
+        if (isMultiPick(f)) {
           let arr = []; try { arr = JSON.parse(el.value || "[]"); } catch (e) { }
           if (arr.length) r.values[f.k] = arr; else delete r.values[f.k];
           return;

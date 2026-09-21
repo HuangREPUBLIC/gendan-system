@@ -95,20 +95,44 @@ function adminPermsHtml() {
   </section>`;
 }
 
+// 字段类型下拉 + 下拉选项输入框，添加和修改字段共用；打卡字段不能和其它类型互转
+function fieldTypeFormHtml(prefix, f) {
+  const type = f ? f.type : "text";
+  const types = f ? FIELD_TYPE_OPTIONS.filter(([v]) => (v === "log") === (type === "log")) : FIELD_TYPE_OPTIONS;
+  return `<label class="field"><span>字段类型</span><select class="in" id="${prefix}-type" onchange="A.syncFieldOpts('${prefix}')">
+      ${types.map(([v, t]) => `<option value="${v}" ${v === type ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
+    <label class="field" id="${prefix}-opts-wrap"${fieldHasOptions(type) ? "" : ` style="display:none"`}><span>下拉选项（逗号分隔）</span>
+      <input class="in" id="${prefix}-opts" placeholder="例：选项A,选项B" value="${esc(f && f.options ? f.options.join(",") : "")}"></label>`;
+}
+// 字段位置：放在本板块哪个字段后面；修改时默认选当前位置
+function fieldAfterHtml(prefix, section, f) {
+  const list = state.fields[section].filter(x => x !== f);
+  const i = f ? state.fields[section].indexOf(f) : -1;
+  const cur = f ? (i > 0 ? state.fields[section][i - 1].k : "") : (list.length ? list[list.length - 1].k : "");
+  return `<label class="field"><span>放在哪个字段后面</span><select class="in" id="${prefix}-after">
+    <option value="" ${cur === "" ? "selected" : ""}>放在最前面</option>
+    ${list.map(x => `<option value="${esc(x.k)}" ${x.k === cur ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select></label>`;
+}
+const readFieldOptions = (prefix, type) => fieldHasOptions(type)
+  ? $(prefix + "-opts").value.split(/[,，、]/).map(s => s.trim()).filter(Boolean) : undefined;
+// 核心字段只展示；其它字段点名字修改，点 ✕ 删除
+const fieldChipHtml = (s, f) => f.core ? chipHtml(f.label, "")
+  : `<span class="tag role"><a href="javascript:void(0)" onclick="A.editField('${s}','${f.k}')" title="点击修改名称、类型和位置">${esc(f.label)}</a>
+    <a href="javascript:void(0)" onclick="A.delField('${s}','${f.k}')" style="margin-left:4px">✕</a></span>`;
+
 function adminFormHtml() {
   return `<section class="group a-fields">
     <div class="group-title">自定义字段</div>
     <div class="card cf-split">
       <div class="cf-lists">${["order", "production"].map(s => `<div class="card-pad" style="padding-bottom:6px">
         <div class="row-sub" style="margin-bottom:6px">${s === "order" ? "一、订单明细" : "二、生产明细"}</div>
-        <div class="chip-wall">${state.fields[s].map(f => chipHtml(f.label, f.core ? "" : `A.delField('${s}','${f.k}')`)).join("")}</div></div>`).join("")}</div>
+        <div class="chip-wall">${state.fields[s].map(f => fieldChipHtml(s, f)).join("")}</div></div>`).join("")}
+        <div class="row-sub card-pad" style="padding-top:0">点字段名可以修改名称、类型和位置</div></div>
       <div class="cf-form">
-      <label class="field"><span>添加到板块</span><select class="in" id="cf-sec"><option value="order">一、订单明细</option><option value="production">二、生产明细</option></select></label>
+      <label class="field"><span>添加到板块</span><select class="in" id="cf-sec" onchange="A.syncFieldAfter()"><option value="order">一、订单明细</option><option value="production">二、生产明细</option></select></label>
+      <div id="cf-after-wrap">${fieldAfterHtml("cf", "order")}</div>
       <label class="field"><span>字段名称</span><input class="in" id="cf-label" placeholder="例：吊牌进度"></label>
-      <label class="field"><span>字段类型</span><select class="in" id="cf-type" onchange="document.getElementById('cf-opts-wrap').style.display=this.value==='select'?'':'none'">
-        <option value="text">文本</option><option value="log">进度打卡（保留历史）</option><option value="date">日期</option>
-        <option value="number">数字</option><option value="select">下拉菜单</option></select></label>
-      <label class="field" id="cf-opts-wrap" style="display:none"><span>下拉选项（逗号分隔）</span><input class="in" id="cf-opts" placeholder="例：选项A,选项B"></label>
+      ${fieldTypeFormHtml("cf")}
       <div class="btn-row"><button class="btn" onclick="A.addField()">添加字段</button></div></div></div>
   </section>
 
@@ -211,11 +235,32 @@ Object.assign(A, {
     const name = decodeURIComponent(encName);
     confirmDanger(`删除季节「${name}」？`, "只有没有订单使用该季节时才能删除。", () => run(() => api("DELETE", "/seasons/" + encName), "季节已删除"));
   },
+  syncFieldOpts(prefix) {
+    $(prefix + "-opts-wrap").style.display = fieldHasOptions($(prefix + "-type").value) ? "" : "none";
+  },
+  syncFieldAfter() { $("cf-after-wrap").innerHTML = fieldAfterHtml("cf", $("cf-sec").value); },
   async addField() {
-    const section = $("cf-sec").value, label = $("cf-label").value.trim(), type = $("cf-type").value;
+    const section = $("cf-sec").value, label = $("cf-label").value.trim(), type = $("cf-type").value, after = $("cf-after").value;
     if (!label) return toast("请填写字段名称");
-    const options = type === "select" ? $("cf-opts").value.split(/[,，]/).map(s => s.trim()).filter(Boolean) : undefined;
-    await run(() => api("POST", "/fields", { section, label, type, options }), "字段已添加：" + label);
+    const options = readFieldOptions("cf", type);
+    if (options && !options.length) return toast("请填写下拉选项");
+    await run(() => api("POST", "/fields", { section, label, type, options, after }), "字段已添加：" + label);
+  },
+  editField(section, key) {
+    const f = state.fields[section].find(x => x.k === key); if (!f) return;
+    modal({ title: `修改字段「${f.label}」`, okText: "保存", keepOpenOnOk: true,
+      html: `<label class="field"><span>字段名称</span><input class="in" id="ef-label" value="${esc(f.label)}"></label>
+        ${fieldTypeFormHtml("ef", f)}
+        ${fieldAfterHtml("ef", section, f)}
+        <div class="row-sub">改成选人类型后，订单里已填的姓名会自动对应到员工。</div>`,
+      onOk: async () => {
+        const label = $("ef-label").value.trim(), type = $("ef-type").value, after = $("ef-after").value;
+        if (!label) return toast("请填写字段名称");
+        const options = readFieldOptions("ef", type);
+        if (options && !options.length) return toast("请填写下拉选项");
+        A.modalCancel();
+        await run(() => api("PATCH", `/fields/${section}/${key}`, { label, type, options, after }), "字段已修改：" + label);
+      } });
   },
   delField(section, key) {
     const f = state.fields[section].find(x => x.k === key); if (!f) return;

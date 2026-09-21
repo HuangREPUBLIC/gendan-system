@@ -11,7 +11,7 @@ const XLSX = require("xlsx");
 const AdmZip = require("adm-zip");
 const { db, UPLOAD_DIR } = require("../db");
 const A = require("../auth");
-const { allFields, activeUser, allOrdersPublic, XML_HEAD, NS_REL, relsXml } = require("./helpers");
+const { allFields, activeUser, allOrdersPublic, USER_FIELD_TYPES, XML_HEAD, NS_REL, relsXml } = require("./helpers");
 
 const router = express.Router();
 const pub = express.Router();  // 不需要登录的路由
@@ -171,7 +171,7 @@ async function sendExport(user, season, res, next) {
           return l ? `${l.text}（${l.byName} ${timeText(l.t)}）` : "";
         }
         if (f.type === "image") return "";  // 款式图嵌在表格里，文字留空
-        if (f.type === "user-sales" || f.type === "user-follower") return nameOf(o.values[f.k]);
+        if (USER_FIELD_TYPES.includes(f.type)) return nameOf(o.values[f.k]);
         const v = o.values[f.k];
         return Array.isArray(v) ? v.join("、") : (v || "");
       })] })) };

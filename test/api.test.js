@@ -103,6 +103,24 @@ async function call(method, path, token, body) {
   const cf = await call("POST", "/fields", aT, { section: "production", label: "吊牌进度", type: "log" });
   ok(cf.status === 200 && cf.j.production.some(f => f.label === "吊牌进度"), "新增自定义打卡字段");
   ok((await call("POST", "/fields", aT, { section: "production", label: "吊牌进度", type: "log" })).status === 400, "同名字段不能重复添加");
+  ok((await call("POST", "/fields", aT, { section: "order", label: "乱写类型", type: "hack" })).status === 400, "不认识的字段类型不能添加");
+  ok((await call("POST", "/fields", aT, { section: "order", label: "空选项", type: "multiselect", options: [] })).status === 400, "下拉多选必须填选项");
+  const ms = await call("POST", "/fields", aT, { section: "order", label: "洗水方式", type: "multiselect", options: ["酵洗", "石洗", "酵洗"] });
+  ok(ms.status === 200 && ms.j.order.find(f => f.label === "洗水方式").options.join() === "酵洗,石洗", "新增下拉多选字段，重复选项自动去掉");
+
+  // 文本字段改成「选人：员工」：已填的姓名换成员工 id，名单外的原样保留
+  const pm = (await call("POST", "/fields", aT, { section: "order", label: "打版师", type: "text" })).j.order.find(f => f.label === "打版师");
+  ok((await call("PATCH", `/orders/${o1.id}`, aT, { values: { [pm.k]: "王建国" } })).status === 200, "文本类型的打版师先填姓名");
+  const pr = await call("PATCH", `/fields/order/${pm.k}`, aT, { type: "user-staff" });
+  ok(pr.status === 200 && pr.j.order.find(f => f.k === pm.k).type === "user-staff", "打版师字段改成「选人：员工」");
+  ok((await call("GET", `/orders/${o1.id}`, aT)).j.values[pm.k] === wang.id, "改类型后，订单里的姓名自动换成员工 id");
+  ok((await call("PATCH", `/fields/order/${pm.k}`, aT, { type: "log" })).status === 400, "普通字段不能改成进度打卡");
+  const mv = await call("PATCH", `/fields/order/${pm.k}`, aT, { after: "sales" });
+  ok(mv.status === 200 && mv.j.order[1].k === pm.k && mv.j.order[0].k === "sales", "打版师可以挪到业务员下面");
+  ok((await call("PATCH", `/fields/order/${pm.k}`, aT, { after: "nope" })).status === 400, "放到不存在的字段后面会被拒绝");
+  ok((await call("PATCH", `/fields/order/${pm.k}`, sT, { type: "text" })).status === 403, "非管理员不能改字段");
+  ok((await call("PATCH", "/fields/order/sales", aT, { type: "text" })).status === 400, "核心字段不能改类型");
+  await call("DELETE", `/fields/order/${pm.k}`, aT);
 
   // inspection + follow
   ok((await call("POST", `/orders/${o1.id}/inspections`, aT, { problems: ["P"] })).status === 200, "新增验货记录(业务员/管理员创建)");

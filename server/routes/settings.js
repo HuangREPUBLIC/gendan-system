@@ -3,20 +3,37 @@
 const express = require("express");
 const { db, getSetting, setSetting } = require("../db");
 const A = require("../auth");
-const { getFields, getFactories } = require("./helpers");
+const { getFields, getFactories, activeUsers, FIELD_TYPES, USER_FIELD_TYPES, MULTI_FIELD_TYPES } = require("./helpers");
 
 const router = express.Router();
 
+const hasOptions = type => type === "select" || type === "multiselect";
+// 把字段放到 after 这个字段后面；after 为 "" 放最前，undefined 不动。找不到返回 false
+function placeField(list, f, after) {
+  if (after === undefined) return true;
+  if (after !== "" && (after === f.k || !list.some(x => x.k === after))) return false;
+  const i = list.indexOf(f); if (i >= 0) list.splice(i, 1);
+  list.splice(after === "" ? 0 : list.findIndex(x => x.k === after) + 1, 0, f);
+  return true;
+}
+const cleanOptions = options => [...new Set((Array.isArray(options) ? options : []).map(s => String(s).trim()).filter(Boolean))];
+
 router.post("/fields", A.adminRequired, (req, res) => {
-  const { section, label, type, options } = req.body || {};
+  const { section, label, options, after } = req.body || {};
+  const type = (req.body || {}).type || "text";
   if (!["order", "production"].includes(section)) return res.status(400).json({ error: "板块不对" });
+  if (!FIELD_TYPES.includes(type)) return res.status(400).json({ error: "字段类型不对" });
   const lb = String(label || "").trim();
   if (!lb) return res.status(400).json({ error: "请填写字段名称" });
   const fields = getFields();
   if (fields[section].some(x => x.label === lb)) return res.status(400).json({ error: `「${lb}」字段已存在，不能重复添加` });
-  const f = { k: "f" + Date.now(), label: lb, type: type || "text" };
-  if (type === "select") f.options = (options || []).map(s => String(s).trim()).filter(Boolean);
+  const f = { k: "f" + Date.now(), label: lb, type };
+  if (hasOptions(type)) {
+    f.options = cleanOptions(options);
+    if (!f.options.length) return res.status(400).json({ error: "请填写下拉选项" });
+  }
   fields[section].push(f);
+  if (!placeField(fields[section], f, after)) return res.status(400).json({ error: "要放在后面的字段不存在" });
   setSetting("fields", fields);
   if (type === "log") {  // 已有订单补上该进度字段
     db.prepare("SELECT id, data FROM orders").all().forEach(r => {
@@ -24,6 +41,60 @@ router.post("/fields", A.adminRequired, (req, res) => {
       db.prepare("UPDATE orders SET data=? WHERE id=?").run(JSON.stringify(d), r.id);
     });
   }
+  res.json(fields);
+});
+
+// 已有订单里的值换成新类型的格式：单值/多选互转，人员字段把姓名换成 id
+function convertFieldValues(key, fromType, toType) {
+  const toUser = USER_FIELD_TYPES.includes(toType) && !USER_FIELD_TYPES.includes(fromType);
+  const fromUser = USER_FIELD_TYPES.includes(fromType) && !USER_FIELD_TYPES.includes(toType);
+  const toMulti = MULTI_FIELD_TYPES.includes(toType), fromMulti = MULTI_FIELD_TYPES.includes(fromType);
+  if (!toUser && !fromUser && toMulti === fromMulti) return;
+  const users = activeUsers();
+  const idByName = new Map(users.map(u => [u.name, u.id])), nameById = new Map(users.map(u => [u.id, u.name]));
+  const update = db.prepare("UPDATE orders SET data=? WHERE id=?");
+  db.prepare("SELECT id, data FROM orders").all().forEach(r => {
+    const d = JSON.parse(r.data), v = (d.values || {})[key];
+    if (v == null || v === "") return;
+    let nv = v;
+    if (fromUser) nv = nameById.get(nv) || nv;
+    if (toMulti && !fromMulti) nv = String(nv).split(/[,，、\/;；]/).map(x => x.trim()).filter(Boolean);
+    if (fromMulti && !toMulti) nv = Array.isArray(nv) ? nv.join("、") : nv;
+    if (toUser) nv = idByName.get(String(nv).trim()) || nv;
+    if (JSON.stringify(nv) === JSON.stringify(v)) return;
+    d.values[key] = nv;
+    update.run(JSON.stringify(d), r.id);
+  });
+}
+
+// 改字段名称、类型、下拉选项、位置；打卡字段和其它类型的数据结构不同，不能互转
+router.patch("/fields/:section/:key", A.adminRequired, (req, res) => {
+  const { section, key } = req.params;
+  const fields = getFields();
+  if (!fields[section]) return res.status(400).json({ error: "板块不对" });
+  const f = fields[section].find(x => x.k === key);
+  if (!f) return res.status(404).json({ error: "字段不存在" });
+  if (f.core) return res.status(400).json({ error: "核心字段不可修改" });
+  const body = req.body || {};
+  const lb = body.label === undefined ? f.label : String(body.label).trim();
+  const type = body.type || f.type;
+  if (!lb) return res.status(400).json({ error: "请填写字段名称" });
+  if (fields[section].some(x => x !== f && x.label === lb)) return res.status(400).json({ error: `「${lb}」字段已存在` });
+  if (!FIELD_TYPES.includes(type)) return res.status(400).json({ error: "字段类型不对" });
+  if ((type === "log") !== (f.type === "log")) return res.status(400).json({ error: "进度打卡字段不能和其它类型互相转换" });
+  const options = hasOptions(type) ? cleanOptions(body.options === undefined ? f.options : body.options) : undefined;
+  if (options && !options.length) return res.status(400).json({ error: "请填写下拉选项" });
+  if (!placeField(fields[section], f, body.after)) return res.status(400).json({ error: "要放在后面的字段不存在" });
+  f.label = lb;
+  const fromType = f.type; f.type = type;
+  if (options) f.options = options; else delete f.options;
+  // 字段配置和订单数据一起改，要么全改要么全不改
+  db.exec("BEGIN");
+  try {
+    convertFieldValues(key, fromType, type);
+    setSetting("fields", fields);
+    db.exec("COMMIT");
+  } catch (e) { db.exec("ROLLBACK"); throw e; }
   res.json(fields);
 });
 
