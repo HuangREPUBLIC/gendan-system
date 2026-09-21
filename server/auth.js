@@ -65,7 +65,7 @@ function adminRequired(req, res, next) {
   next();
 }
 
-/* 权限：template 决定"自己的单"怎么算(业务员看 sales，下厂员看 follower)，
+/* 权限：订单所有登录用户都能看；template 决定"自己的单"怎么算(业务员看 sales，下厂员看 follower)，
  * perms 决定能做什么(管理员在「管理 → 权限」里逐项开关，未配置时按模板默认) */
 const isAdmin = (u) => u && u.role === "admin";
 const isSupervisor = (u) => u && templateOf(u) === "supervisor";
@@ -89,7 +89,7 @@ function permsOf(u) {
   PERM_KEYS.forEach(k => { if (typeof saved[k] === "boolean") out[k] = saved[k]; });
   return out;
 }
-// 是否本单相关人员：scope=all 全部相关，否则按模板认归属
+// 是否本单相关人员(决定能不能改/打卡)：scope=all 全部相关，否则按模板认归属
 function isRelated(u, order) {
   if (!u || !order) return false;
   if (permsOf(u).scope === "all") return true;
@@ -99,7 +99,8 @@ function isRelated(u, order) {
   if (t === "follower") return v.follower === u.id;
   return false;
 }
-const canViewOrder = isRelated;
+// 查看不分归属，登录即可看全部订单
+const canViewOrder = (u, order) => !!u && !!order;
 // section 为 "order"/"production"；不传表示任一板块有权即可
 function sectionPerm(u, order, section, orderKey, prodKey) {
   if (!isRelated(u, order)) return false;

@@ -1,5 +1,5 @@
 // 改动前端后升级版本号，旧缓存会被清掉
-const CACHE = "daka-v9";
+const CACHE = "daka-v10";
 const SHELL = ["/", "/index.html", "/styles.css",
   "/js/state.js", "/js/utils.js", "/js/perms.js", "/js/api.js", "/js/modal.js", "/js/fields.js",
   "/js/layout.js", "/js/photos.js", "/js/lightbox.js", "/js/auth.js", "/js/order-list.js", "/js/order-new.js",

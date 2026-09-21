@@ -34,13 +34,10 @@ function vOrders() {
   const opt = (arr, cur) => arr.map(([v, t]) =>
     `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(t)}</option>`).join("");
   const allFactories = [...new Set([...state.factories.prod, ...state.factories.fabric, ...state.factories.emb])];
-  // 业务员/下厂员看不到对应的人员筛选
-  const myTemplate = (me() || {}).template;
   const all = baseFiltered;
   const shipped = all.filter(o => o.values.shipDate).length;
   const recent = all.filter(o => isRecent(latestLog(o))).length;
   const pct = n => all.length ? Math.round(n / all.length * 100) + "%" : "—";
-  // state.orders 已按权限过滤，合计的是自己能看到的
   const qtySum = arr => arr.reduce((t, o) => t + (parseFloat(String(o.values.qty || "").replace(/[,，\s]/g, "")) || 0), 0)
     .toLocaleString("zh-CN");
   // 点卡片按条件筛选，再点取消
@@ -64,8 +61,8 @@ function vOrders() {
       <input class="in f-kw" id="flt-kw" type="search" enterkeyhint="search" autocomplete="off" placeholder="搜货号 / 款式名" value="${esc(filt.kw)}" oninput="A.setFKw(this.value)">
       <div class="f-chips">
       <select class="in${filt.season ? " on" : ""}" aria-label="按季节筛选" onchange="A.setF('season',this.value)"><option value="">全部季节</option>${opt(seasonOptions("").map(s => [s, s]), filt.season)}</select>
-      ${myTemplate === "sales" ? "" : `<select class="in${filt.sales ? " on" : ""}" aria-label="按业务员筛选" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]), filt.sales)}</select>`}
-      ${myTemplate === "follower" ? "" : `<select class="in${filt.follower ? " on" : ""}" aria-label="按下厂员筛选" onchange="A.setF('follower',this.value)"><option value="">全部下厂员</option>${opt(state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]), filt.follower)}</select>`}
+      <select class="in${filt.sales ? " on" : ""}" aria-label="按业务员筛选" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]), filt.sales)}</select>
+      <select class="in${filt.follower ? " on" : ""}" aria-label="按下厂员筛选" onchange="A.setF('follower',this.value)"><option value="">全部下厂员</option>${opt(state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]), filt.follower)}</select>
       <select class="in${filt.factoryKw ? " on" : ""}" aria-label="按工厂筛选" onchange="A.setF('factoryKw',this.value)"><option value="">全部工厂</option>${opt(allFactories.map(x => [x, x]), filt.factoryKw)}</select>
       </div>
     </div></div></section>

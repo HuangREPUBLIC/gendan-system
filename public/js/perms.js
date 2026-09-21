@@ -31,6 +31,7 @@ function myPerms() {
   return mergePerms(u.template, (state.roles.find(r => r.k === u.role) || {}).perms);
 }
 const permsOfRole = r => mergePerms(r.template, r.perms);
+// 是否本单相关人员(决定能不能改/打卡；查看不受限)
 function isRelated(o) {
   const u = me(); if (!u || !o) return false;
   if (myPerms().scope === "all") return true;
