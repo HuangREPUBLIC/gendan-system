@@ -144,8 +144,9 @@ function vDetail() {
         ${photoPicker("follow")}
         <div style="margin-top:8px"><button class="btn mini" onclick="A.addFollow('${o.id}')">提交</button></div></div>
       ${o.followIssues.length ? `<ul class="log" style="padding:4px 16px 12px">${o.followIssues.slice().sort((a, b) => b.t - a.t).map(e => `<li>
-        <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>${canTouchEntry(o, e) ?
-          `<button type="button" class="act-btn danger" onclick="A.delFollow('${o.id}','${e.id}')">删</button>` : ""}</div>
+        <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>${canTouchEntry(o, e) ? `<span class="act-row">
+          <button type="button" class="act-btn" onclick="A.editFollow('${o.id}','${e.id}')">改</button>
+          <button type="button" class="act-btn danger" onclick="A.delFollow('${o.id}','${e.id}')">删</button></span>` : ""}</div>
         ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>` : `<div class="empty">暂无记录</div>`}</div>
   </section>
   ${isAdmin() ? `<section class="group g-del"><div class="btn-row" style="padding-left:0;padding-right:0">
@@ -198,14 +199,31 @@ Object.assign(A, {
     } else if (!text && !photos.length) return toast("请填写打卡内容或加照片");
     await run(() => api("POST", `/orders/${oid}/logs`, body).then(() => { delete photoDraft["log:" + key]; }), "打卡成功");
   },
+  // 改打卡：文字、照片(可增删)，本厂/加工点另有工序、人数、预计下车时间
   editLog(oid, key, eid) {
     const o = state.orders.find(x => x.id === oid);
     const list = key === "mainLog" ? o.mainLog
       : key.startsWith("sub:") ? ((o.subs.find(s => s.id === key.slice(4)) || {}).log || [])
       : (o.logs[key] || []);
     const e = list.find(x => x.id === eid); if (!e) return;
-    askText({ title: "修改打卡内容", input: "textarea", value: e.text, okText: "保存" },
-      t => run(() => api("PATCH", `/orders/${oid}/logs/${key}/${eid}`, { text: t }), "已修改"));
+    const isMainSub = key === "mainLog" || key.startsWith("sub:");
+    editEntryModal({ title: "修改打卡", ctx: "edit:" + eid, text: e.text, photos: e.photos, allowEmpty: isMainSub,
+      extraHtml: isMainSub ? `
+        <label class="field"><span>生产工序</span><input class="in" id="el-proc" value="${esc(e.process || "")}"></label>
+        <label class="field"><span>车工人数</span><input class="in" type="number" id="el-workers" value="${esc(e.workers || "")}"></label>
+        <label class="field"><span>预计下车时间</span>${dateFieldHtml("el-est", e.estDone || "")}</label>` : "",
+      collect: () => {
+        if (!isMainSub) return {};
+        const x = { process: $("el-proc").value.trim(), workers: $("el-workers").value.trim(), estDone: $("el-est").value };
+        return x.process && x.workers && x.estDone ? x : "请填写生产工序、车工人数、预计下车时间";
+      },
+      save: body => api("PATCH", `/orders/${oid}/logs/${key}/${eid}`, body) });
+  },
+  editFollow(oid, eid) {
+    const o = state.orders.find(x => x.id === oid);
+    const e = o && o.followIssues.find(x => x.id === eid); if (!e) return;
+    editEntryModal({ title: "修改跟单小结", ctx: "edit:" + eid, text: e.text, photos: e.photos,
+      save: body => api("PATCH", `/orders/${oid}/follow/${eid}`, body) });
   },
   delLog(oid, key, eid) {
     confirmDanger("删除这条打卡记录？", "", () => run(() => api("DELETE", `/orders/${oid}/logs/${key}/${eid}`), "已删除"));

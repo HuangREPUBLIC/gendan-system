@@ -114,6 +114,12 @@ function ensureDefaults() {
     db.exec("ALTER TABLE notifications ADD COLUMN what TEXT");
     console.log("[db] 已为 notifications 表补上 actor_name/order_label/what 列");
   }
+  // 同一人连续改同一单时合并成一条：actor_id 用来认人，merged 记合并了几次
+  if (!columnExists("notifications", "actor_id")) {
+    db.exec("ALTER TABLE notifications ADD COLUMN actor_id TEXT");
+    db.exec("ALTER TABLE notifications ADD COLUMN merged INTEGER NOT NULL DEFAULT 1");
+    console.log("[db] 已为 notifications 表补上 actor_id/merged 列");
+  }
   const roles = getSetting("roles", null);
   if (!roles || !roles.length) {
     setSetting("roles", DEFAULT_ROLES);

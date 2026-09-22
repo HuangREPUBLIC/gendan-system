@@ -3,14 +3,15 @@
 
 window.go = go; window.A = A;
 
-// 从系统通知进来(?order= / ?chat=)时直接跳转，并清掉参数
+// 从系统通知进来(?order= / ?chat= / ?notifs=)时直接跳转，并清掉参数
 function openFromPush() {
   try {
     const q = new URLSearchParams(location.search);
-    const order = q.get("order"), chat = q.get("chat");
-    if (!order && !chat) return;
+    const order = q.get("order"), chat = q.get("chat"), notifs = q.get("notifs");
+    if (!order && !chat && !notifs) return;
     history.replaceState(null, "", location.pathname);
     if (order) go("detail", order);
+    else if (notifs) go("notifs");
     else if (chat) { go("chat"); A.openChat(chat); }
   } catch (e) {}
 }

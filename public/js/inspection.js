@@ -17,7 +17,9 @@ function inspItemHtml(o, g, it, canInsp, canFix) {
 function inspBatchHtml(o, g, canInsp, canFix) {
   return `<div class="insp-day">
     <div class="lf-head"><span style="font-weight:400;color:var(--ink-2);font-size:12.5px">${esc(g.byName)} · <span class="num">${fmtT(g.t)}</span></span>
-      ${canTouchEntry(o, g) ? `<button type="button" class="act-btn danger right" onclick="A.delInsp('${o.id}','${g.id}')">删除</button>` : ""}</div>
+      ${canTouchEntry(o, g) ? `<span class="act-row right">
+        <button type="button" class="act-btn" onclick="A.editInspPhotos('${o.id}','${g.id}')">改照片</button>
+        <button type="button" class="act-btn danger" onclick="A.delInsp('${o.id}','${g.id}')">删除</button></span>` : ""}</div>
     ${g.items.map(it => inspItemHtml(o, g, it, canInsp, canFix)).join("")}${photoGallery(g.photos)}</div>`;
 }
 
@@ -39,6 +41,12 @@ Object.assign(A, {
     const photos = photoDraft.insp || [];
     if (!problems.length && !photos.length) return toast("请至少填写一条发现的问题或加照片");
     await run(() => api("POST", `/orders/${oid}/inspections`, { problems, photos }).then(() => { delete photoDraft.insp; }), "验货记录已保存");
+  },
+  editInspPhotos(oid, gid) {
+    const o = state.orders.find(x => x.id === oid);
+    const g = o && o.inspections.find(x => x.id === gid); if (!g) return;
+    editEntryModal({ title: "修改验货照片", ctx: "edit:" + gid, photos: g.photos,
+      save: body => api("PATCH", `/orders/${oid}/inspections/${gid}`, body) });
   },
   delInsp(oid, gid) {
     confirmDanger("删除这组验货记录？", "", () => run(() => api("DELETE", `/orders/${oid}/inspections/${gid}`), "已删除"));

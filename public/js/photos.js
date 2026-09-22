@@ -210,6 +210,35 @@ function photoGallery(urls) {
   return `<div class="photos-grid ro">${photoThumbs(urls, false)}</div>`;
 }
 
+/* 改一条记录的文字和照片(打卡、验货、跟单小结共用)。
+ * opts: title, ctx(照片草稿键), text(undefined 表示没有文字框), photos, extraHtml, collect()->额外字段或错误文字,
+ *       allowEmpty(文字和照片都空也能存), save(body)->Promise */
+function editEntryModal(opts) {
+  const ctx = opts.ctx;
+  // 关弹窗(保存或取消)时丢掉这次的草稿和没传完的照片
+  const cleanup = () => {
+    (photoPending[ctx] || []).forEach(it => { it.removed = true; if (it.xhr) it.xhr.abort(); });
+    delete photoPending[ctx]; delete photoDraft[ctx];
+  };
+  photoDraft[ctx] = normalizePhotos(opts.photos).slice();
+  const hasText = opts.text !== undefined;
+  modal({ title: opts.title, okText: "保存", wide: true, keepOpenOnOk: true, onCancel: cleanup,
+    html: `${opts.extraHtml || ""}${hasText ? `<textarea class="in" id="ee-text" placeholder="填写内容"
+      style="margin-top:8px;min-height:90px">${esc(opts.text || "")}</textarea>` : ""}
+      <div class="ee-photos-label">照片 · 点 ✕ 删除，点「拍照」「相册」添加</div>${photoPicker(ctx)}`,
+    onOk: async () => {
+      if (photosBlocked(ctx)) return;
+      const body = { photos: photoDraft[ctx] || [] };
+      if (hasText) body.text = $("ee-text").value.trim();
+      const extra = opts.collect ? opts.collect() : {};
+      if (typeof extra === "string") return toast(extra);
+      Object.assign(body, extra);
+      if (!opts.allowEmpty && hasText && !body.text && !body.photos.length) return toast("内容和照片不能都为空");
+      A.modalCancel();
+      await run(() => opts.save(body), "已修改");
+    } });
+}
+
 Object.assign(A, {
   addDraftPhotos(ctx, input) {
     const files = [...(input.files || [])]; input.value = "";

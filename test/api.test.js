@@ -148,6 +148,17 @@ async function call(method, path, token, body) {
   // 跟单带照片
   const fl = await call("POST", `/orders/${o1.id}/follow`, aT, { text: "带图跟单", photos: ["/uploads/f1.jpg"] });
   ok(fl.status === 200 && fl.j.followIssues.some(e => e.text === "带图跟单" && (e.photos || []).includes("/uploads/f1.jpg")), "跟单照片已保存");
+  // 已有记录的照片可以增删：打卡、验货、跟单小结
+  const ph = await call("PATCH", `/orders/${o1.id}/logs/cutting/${eid}`, aT, { text: "改了字", photos: ["/uploads/a.jpg", "/uploads/new.jpg"] });
+  ok(ph.j.logs.cutting.find(e => e.id === eid).photos.join() === "/uploads/a.jpg,/uploads/new.jpg", "打卡记录能删掉一张、再加一张照片");
+  const inspG = ins.j.inspections.find(g => (g.photos || []).includes("/uploads/insp.jpg"));
+  ok((await call("PATCH", `/orders/${o1.id}/inspections/${inspG.id}`, aT, { photos: [] })).status === 400, "没有问题条目的验货不能把照片删光");
+  const ip = await call("PATCH", `/orders/${o1.id}/inspections/${inspG.id}`, aT, { photos: ["/uploads/insp2.jpg"] });
+  ok(ip.status === 200 && ip.j.inspections.find(g => g.id === inspG.id).photos.join() === "/uploads/insp2.jpg", "验货照片可以替换");
+  const flE = fl.j.followIssues.find(e => e.text === "带图跟单");
+  ok((await call("PATCH", `/orders/${o1.id}/follow/${flE.id}`, fT, { text: "x" })).status === 403, "无关的人不能改别人的跟单小结");
+  const fp = await call("PATCH", `/orders/${o1.id}/follow/${flE.id}`, aT, { text: "改过的跟单", photos: [] });
+  ok(fp.status === 200 && fp.j.followIssues.find(e => e.id === flE.id).photos.length === 0, "跟单小结的文字和照片都能改");
   // 款式图多图相册
   const alb = await call("POST", "/orders", aT, { season: "SS2027", values: { styleNo: "ALB-1", img: ["/uploads/p1.jpg", "/uploads/p2.jpg", "/uploads/p3.jpg"] } });
   ok(alb.status === 200 && Array.isArray(alb.j.values.img) && alb.j.values.img.length === 3, "款式图可存多张");
@@ -309,13 +320,27 @@ async function call(method, path, token, body) {
   ok((await call("POST", `/orders/${nId}/follow`, sT, { text: "通知测试跟单" })).status === 200, "新增跟单小结(触发通知)");
   const sNotifs = await listOf(sT);
   ok(sNotifs.some(n => n.text.includes("王建国") && n.text.includes("裁剪进度")), "打卡会通知到本单业务员，并写明是哪个环节");
-  ok(await unreadOf(wT) === 3, "验货问题/跟单小结也会通知到下厂员(共3条：改单+验货+跟单)");
+  const wMerged = (await listOf(wT)).filter(n => !n.read);
+  ok(wMerged.length === 1 && wMerged[0].merged === 3 && wMerged[0].what === "新增了跟单小结",
+    "同一人半小时内在同一单的改单+验货+跟单合并成一条未读通知，显示最新动作和次数");
   ok(sNotifs.length > 0 && sNotifs[0].createdAt >= sNotifs[sNotifs.length - 1].createdAt, "通知列表按时间倒序");
 
   // 标记单条已读 / 全部已读
   const oneId = (await listOf(wT)).find(n => !n.read).id;
   ok((await call("POST", `/notifications/${oneId}/read`, wT)).status === 200, "标记单条通知已读");
-  ok(await unreadOf(wT) === 2, "标记单条后未读数减一");
+  ok(await unreadOf(wT) === 0, "标记单条后未读数减一");
+  // 已读之后再有改动另起一条；表单连没改的字段一起提交时，只报真正改了的
+  const cur = (await call("GET", `/orders/${nId}`, sT)).j.values;
+  delete cur.shipDate;  // 发货日期已锁，表单不会再提交它
+  ok((await call("PATCH", `/orders/${nId}`, sT, { season: "SS2027", values: Object.assign({}, cur, { styleName: "改名后" }) })).status === 200, "整张表单提交，只改了款式名");
+  const fresh = (await listOf(wT)).filter(n => !n.read);
+  ok(fresh.length === 1 && fresh[0].what === "把「款式名」改成了改名后", "通知只写真正改了的「款式名」，不再列一堆没改的字段");
+  const cnt = await unreadOf(wT);
+  await call("PATCH", `/orders/${nId}`, sT, { season: "SS2027", values: Object.assign({}, cur, { styleName: "改名后" }) });
+  ok(await unreadOf(wT) === cnt && (await listOf(wT)).find(n => n.id === fresh[0].id).merged === 1, "什么都没改的保存不发通知");
+  ok((await call("POST", "/notifications/read-batch", sT, { ids: [fresh[0].id] })).status === 200 && await unreadOf(wT) === 1, "批量已读不能动别人的通知");
+  await call("POST", "/notifications/read-batch", wT, { ids: [fresh[0].id] });
+  ok(await unreadOf(wT) === 0, "批量标记已读");
   ok((await call("POST", `/notifications/${oneId}/read`, sT)).status === 403, "不能标记别人的通知为已读");
   ok((await call("POST", "/notifications/xxx-not-exist/read", wT)).status === 404, "标记不存在的通知返回404");
   ok((await call("POST", "/notifications/read-all", wT)).status === 200, "标记全部已读");

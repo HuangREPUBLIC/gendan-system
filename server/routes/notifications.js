@@ -14,7 +14,7 @@ router.get("/notifications", (req, res) => {
   // actorName/orderLabel/what 老通知为 NULL，前端退回纯文本
   res.json(rows.map(r => ({
     id: r.id, orderId: r.order_id, text: r.text, createdAt: r.created_at, read: !!r.read_at,
-    actorName: r.actor_name, orderLabel: r.order_label, what: r.what
+    actorName: r.actor_name, actorId: r.actor_id, orderLabel: r.order_label, what: r.what, merged: r.merged || 1
   })));
 });
 
@@ -37,6 +37,20 @@ function ownNotif(req, res) {
 router.post("/notifications/:id/read", (req, res) => {
   const row = ownNotif(req, res); if (!row) return;
   if (!row.read_at) db.prepare("UPDATE notifications SET read_at = ? WHERE id = ?").run(Date.now(), row.id);
+  res.json({ ok: true });
+});
+
+// 批量已读/删除(通知分组用)；只动自己的
+const ownIds = req => (Array.isArray((req.body || {}).ids) ? req.body.ids : []).map(String).slice(0, NOTIF_LIMIT);
+router.post("/notifications/read-batch", (req, res) => {
+  const stmt = db.prepare("UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL");
+  const now = Date.now();
+  ownIds(req).forEach(id => stmt.run(now, id, req.user.id));
+  res.json({ ok: true });
+});
+router.post("/notifications/delete-batch", (req, res) => {
+  const stmt = db.prepare("DELETE FROM notifications WHERE id = ? AND user_id = ?");
+  ownIds(req).forEach(id => stmt.run(id, req.user.id));
   res.json({ ok: true });
 });
 

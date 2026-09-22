@@ -69,6 +69,12 @@ function emptyOrderData(values) {
   return { values: values || {}, logs, mainLog: [], subs: [], inspections: [], followIssues: [] };
 }
 
+// 空值(undefined/null/""/[])都算没填；数组按内容比
+function sameValue(a, b) {
+  const norm = v => v == null || v === "" || (Array.isArray(v) && !v.length) ? "" : JSON.stringify(v);
+  return norm(a) === norm(b);
+}
+
 /* ---------- 应用内通知 ----------
  * 订单被别人改动时通知本单业务员/下厂员/创建人和所有主管、管理员(不含操作者)；失败不影响主流程 */
 function orderLabel(o) {
@@ -108,6 +114,20 @@ function logLabelOf(o, key) {
   }
   return fieldLabelOf(key);
 }
+// 同一人在同一单上的未读通知，这段时间内再有改动就合并成一条，不往下堆
+const NOTIF_MERGE_MS = 30 * 60 * 1000;
+// 系统推送：同一人这段时间里连着动了多张单，只推一条汇总(同 tag 覆盖)
+const PUSH_BATCH_MS = 3 * 60 * 1000;
+const pushBatchOf = new Map();  // actorId -> { last, orders:Set }
+function pushPayload(actor, o, label, what) {
+  const now = Date.now();
+  let b = pushBatchOf.get(actor.id);
+  if (!b || now - b.last > PUSH_BATCH_MS) b = { orders: new Set() };
+  b.last = now; b.orders.add(o.id); pushBatchOf.set(actor.id, b);
+  if (b.orders.size < 2) return { title: label, body: `${actor.name} ${what}`, url: `/?order=${o.id}`, tag: `order-${o.id}` };
+  return { title: "订单动态", body: `${actor.name} 连续更新了 ${b.orders.size} 个订单，最近一单：${label}`,
+    url: "/?notifs=1", tag: `batch-${actor.id}` };
+}
 function notifyOrder(actor, o, what) {
   try {
     const v = (o.data && o.data.values) || {};
@@ -120,10 +140,17 @@ function notifyOrder(actor, o, what) {
     const label = orderLabel(o);
     const text = `${actor.name} 在 ${label} ${what}`;
     const now = Date.now();
-    const stmt = db.prepare("INSERT INTO notifications(id,user_id,order_id,text,created_at,read_at,actor_name,order_label,what) VALUES(?,?,?,?,?,NULL,?,?,?)");
-    ids.forEach(uid2 => stmt.run(uid(), uid2, o.id, text, now, actor.name, label, what));
-    // 同时发系统推送；tag 用订单 id，同一张单只留最新一条
-    P.sendToUsers([...ids], { title: label, body: `${actor.name} ${what}`, url: `/?order=${o.id}`, tag: `order-${o.id}` });
+    const findOpen = db.prepare(`SELECT id FROM notifications WHERE user_id = ? AND order_id = ? AND actor_id = ?
+      AND read_at IS NULL AND created_at > ? ORDER BY created_at DESC LIMIT 1`);
+    const merge = db.prepare("UPDATE notifications SET text=?, what=?, order_label=?, created_at=?, merged=merged+1 WHERE id=?");
+    const insert = db.prepare(`INSERT INTO notifications(id,user_id,order_id,text,created_at,read_at,actor_name,order_label,what,actor_id,merged)
+      VALUES(?,?,?,?,?,NULL,?,?,?,?,1)`);
+    ids.forEach(uid2 => {
+      const open = findOpen.get(uid2, o.id, actor.id, now - NOTIF_MERGE_MS);
+      if (open) merge.run(text, what, label, now, open.id);
+      else insert.run(uid(), uid2, o.id, text, now, actor.name, label, what, actor.id);
+    });
+    P.sendToUsers([...ids], pushPayload(actor, o, label, what));
   } catch (e) { console.error("[notify] 生成通知失败", e); }
 }
 
@@ -174,6 +201,7 @@ router.patch("/orders/:id", withOrder, (req, res) => {
   const o = req.order;
   if (!A.canEditBasic(req.user, o)) return res.status(403).json({ error: "无权修改此订单的基本信息" });
   const { season, values } = req.body || {};
+  const before = { season: o.season, values: Object.assign({}, o.data.values) };
   // 季节算「一、订单明细」；其余字段按所属板块分别校验
   if (season !== undefined && String(season).trim()) {
     if (!A.canEditSection(req.user, o, "order")) return res.status(403).json({ error: "无权修改「一、订单明细」的内容" });
@@ -206,14 +234,15 @@ router.patch("/orders/:id", withOrder, (req, res) => {
     o.data.values = Object.assign({}, o.data.values, cleanOrderValues(values));
   }
   saveOrder(o);
-  // 通知：改一个字段写明新值，改多个列出字段名
-  const changedKeys = (values && typeof values === "object") ? Object.keys(values) : [];
-  if (season !== undefined) changedKeys.unshift("season");
+  // 通知只报真正变了的字段(表单会把没改的也一起提交)；改一个写明新值，改多个列出字段名
+  const changedKeys = Object.keys((values && typeof values === "object") ? values : {})
+    .filter(k => !sameValue(before.values[k], o.data.values[k]));
+  if (o.season !== before.season) changedKeys.unshift("season");
   if (changedKeys.length) {
     let what;
     if (changedKeys.length === 1) {
       const key = changedKeys[0];
-      const val = key === "season" ? o.season : values[key];
+      const val = key === "season" ? o.season : o.data.values[key];
       const valText = fieldValueText(key, val);
       what = valText ? `把「${changeLabelOf(key)}」改成了${valText}` : `修改了「${changeLabelOf(key)}」`;
     } else {
@@ -260,9 +289,16 @@ router.patch("/orders/:id/logs/:key/:entryId", withOrder, (req, res) => {
   const { e } = logEntryOf(o, req.params.key, req.params.entryId);
   if (!e) return res.status(404).json({ error: "记录不存在" });
   if (!A.canTouchEntry(req.user, o, e, sectionOfKey(req.params.key))) return res.status(403).json({ error: "无权修改这条打卡记录" });
-  const t = String((req.body || {}).text || "").trim();
-  const photos = Array.isArray((req.body || {}).photos) ? cleanPhotos((req.body || {}).photos) : (e.photos || []);
-  if (!t && !photos.length) return res.status(400).json({ error: "内容和照片不能都为空" });
+  const body = req.body || {};
+  const t = String(body.text || "").trim();
+  const photos = Array.isArray(body.photos) ? cleanPhotos(body.photos) : (e.photos || []);
+  // 本厂/加工点的工序、人数、预计下车时间：传了就改，改完仍必须齐全
+  if (e.process !== undefined || body.process !== undefined) {
+    const pick = (k, cur) => body[k] === undefined ? cur : String(body[k] || "").trim();
+    const proc = pick("process", e.process), wk = pick("workers", e.workers), est = pick("estDone", e.estDone);
+    if (!proc || !wk || !est) return res.status(400).json({ error: "请填写生产工序、车工人数、预计下车时间" });
+    Object.assign(e, { process: proc, workers: wk, estDone: est });
+  } else if (!t && !photos.length) return res.status(400).json({ error: "内容和照片不能都为空" });
   e.text = t; e.photos = photos; saveOrder(o);
   res.json(orderPublic(o));
 });
@@ -367,6 +403,18 @@ router.post("/orders/:id/inspections/:instId/items/:itemId/notes", withOrder, (r
   res.json(orderPublic(o));
 });
 
+// 改一组验货的照片；问题条目各自改
+router.patch("/orders/:id/inspections/:inspId", withOrder, (req, res) => {
+  const o = req.order;
+  const g = o.data.inspections.find(x => x.id === req.params.inspId);
+  if (!g) return res.status(404).json({ error: "记录不存在" });
+  if (!A.canTouchEntry(req.user, o, g)) return res.status(403).json({ error: "无权修改这条验货记录" });
+  const photos = cleanPhotos((req.body || {}).photos);
+  if (!g.items.length && !photos.length) return res.status(400).json({ error: "没有问题条目时至少要留一张照片" });
+  g.photos = photos; saveOrder(o);
+  res.json(orderPublic(o));
+});
+
 router.delete("/orders/:id/inspections/:inspId", withOrder, (req, res) => {
   const o = req.order;
   const g = o.data.inspections.find(x => x.id === req.params.inspId);
@@ -385,6 +433,19 @@ router.post("/orders/:id/follow", withOrder, (req, res) => {
   o.data.followIssues.push({ id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text: t, photos });
   saveOrder(o);
   notifyOrder(req.user, o, "新增了跟单小结");
+  res.json(orderPublic(o));
+});
+
+router.patch("/orders/:id/follow/:entryId", withOrder, (req, res) => {
+  const o = req.order;
+  const e = o.data.followIssues.find(x => x.id === req.params.entryId);
+  if (!e) return res.status(404).json({ error: "记录不存在" });
+  if (!A.canTouchEntry(req.user, o, e)) return res.status(403).json({ error: "无权修改这条记录" });
+  const body = req.body || {};
+  const t = body.text === undefined ? e.text : String(body.text || "").trim();
+  const photos = Array.isArray(body.photos) ? cleanPhotos(body.photos) : (e.photos || []);
+  if (!t && !photos.length) return res.status(400).json({ error: "内容和照片不能都为空" });
+  e.text = t; e.photos = photos; saveOrder(o);
   res.json(orderPublic(o));
 });
 

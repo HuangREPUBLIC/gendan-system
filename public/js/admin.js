@@ -98,9 +98,11 @@ function adminPermsHtml() {
 // 字段类型下拉 + 下拉选项输入框，添加和修改字段共用；打卡字段不能和其它类型互转
 function fieldTypeFormHtml(prefix, f) {
   const type = f ? f.type : "text";
-  const types = f ? FIELD_TYPE_OPTIONS.filter(([v]) => (v === "log") === (type === "log")) : FIELD_TYPE_OPTIONS;
+  // 修改时保留当前类型，哪怕它不在常用列表里
+  const choices = f && !FIELD_TYPE_CHOICES.includes(type) ? [...FIELD_TYPE_CHOICES, type] : FIELD_TYPE_CHOICES;
+  const types = f ? choices.filter(v => (v === "log") === (type === "log")) : choices;
   return `<label class="field"><span>字段类型</span><select class="in" id="${prefix}-type" onchange="A.syncFieldOpts('${prefix}')">
-      ${types.map(([v, t]) => `<option value="${v}" ${v === type ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label>
+      ${types.map(v => `<option value="${v}" ${v === type ? "selected" : ""}>${esc(FIELD_TYPE_LABEL[v] || v)}</option>`).join("")}</select></label>
     <label class="field" id="${prefix}-opts-wrap"${fieldHasOptions(type) ? "" : ` style="display:none"`}><span>下拉选项（逗号分隔）</span>
       <input class="in" id="${prefix}-opts" placeholder="例：选项A,选项B" value="${esc(f && f.options ? f.options.join(",") : "")}"></label>`;
 }

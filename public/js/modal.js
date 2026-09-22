@@ -13,7 +13,7 @@ function renderModal() {
   const mask = $("mask");
   if (!modalState) { mask.classList.remove("show"); mask.innerHTML = ""; return; }
   const o = modalState;
-  mask.innerHTML = `<div class="modal" role="dialog" aria-modal="true">
+  mask.innerHTML = `<div class="modal${o.wide ? " wide" : ""}" role="dialog" aria-modal="true">
     <div class="m-title">${esc(o.title)}</div>
     ${o.body ? `<div class="m-body">${esc(o.body)}</div>` : ""}
     ${o.html ? `<div style="margin-top:14px">${o.html}</div>` : ""}
@@ -35,5 +35,8 @@ Object.assign(A, {
     modalState = null; renderModal();
     if (st.onOk) st.onOk(v);
   },
-  modalCancel() { modalState = null; renderModal(); },
+  modalCancel() {
+    const st = modalState; modalState = null; renderModal();
+    if (st && st.onCancel) st.onCancel();
+  },
 });

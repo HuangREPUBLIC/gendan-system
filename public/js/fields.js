@@ -1,15 +1,14 @@
 "use strict";
 // 订单字段的表单控件：下拉、日期、多选工厂、季节标签
 
-// 管理员添加/修改字段时可选的类型(同服务端 FIELD_TYPES)
-const FIELD_TYPE_OPTIONS = [
-  ["text", "文本"], ["textarea", "多行文本"], ["number", "数字"], ["date", "日期"],
-  ["select", "下拉单选（自填选项）"], ["multiselect", "下拉多选（自填选项）"],
-  ["user-staff", "选人：员工(不含主管)"], ["user-any", "选人：所有人"],
-  ["user-sales", "选人：业务员"], ["user-follower", "选人：下厂员"],
-  ["factory-prod", "选服装工厂"], ["factory-fabric", "选面料工厂（可多选）"], ["factory-emb", "选绣印工厂（可多选）"],
-  ["log", "进度打卡（保留历史）"]
-];
+// 字段类型名称(同服务端 FIELD_TYPES)；添加字段只给常用的几种，其余是内置字段在用的
+const FIELD_TYPE_LABEL = {
+  text: "文本", number: "数字", date: "日期", select: "下拉单选", multiselect: "下拉多选",
+  "user-staff": "选员工（不含主管）", log: "进度打卡（保留历史）",
+  textarea: "多行文本", "user-any": "选人：所有人", "user-sales": "选业务员", "user-follower": "选下厂员",
+  "factory-prod": "选服装工厂", "factory-fabric": "选面料工厂", "factory-emb": "选绣印工厂"
+};
+const FIELD_TYPE_CHOICES = ["text", "number", "date", "select", "multiselect", "user-staff", "log"];
 const fieldHasOptions = type => type === "select" || type === "multiselect";
 // 人员下拉：值存用户 id，显示姓名
 const USER_FIELD_PICK = {

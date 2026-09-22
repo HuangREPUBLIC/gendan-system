@@ -21,7 +21,7 @@ const allOrdersPublic = () => loadAllOrders().map(orderPublic);
 const visibleOrdersPublic = u => loadAllOrders().filter(r => A.canViewOrder(u, r)).map(orderPublic);
 const logFields = () => allFields().filter(x => x.type === "log");
 
-// 管理员可选的字段类型；image 只给内置款式图用
+// 服务端认的字段类型(前端添加时只列常用几种)；image 只给内置款式图用
 const FIELD_TYPES = ["text", "textarea", "number", "date", "select", "multiselect", "log",
   "user-staff", "user-any", "user-sales", "user-follower", "factory-prod", "factory-fabric", "factory-emb"];
 // 人员下拉：值存用户 id
