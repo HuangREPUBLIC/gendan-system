@@ -136,7 +136,7 @@ Object.assign(A, {
       const names = tpl => state.users.filter(u => u.template === tpl).map(u => u.name);
       const later = new Date(Date.now() + 30 * 86400000), pad = x => String(x).padStart(2, "0");
       const sampleOf = f => f.k === "styleNo" ? "SS27-T001" : f.k === "styleName" ? "女装印花短袖T恤" : f.k === "qty" ? "1200"
-        : f.type === "date" ? (f.k === "shipDate" ? "" : `${later.getFullYear()}-${pad(later.getMonth() + 1)}-${pad(later.getDate())}`)
+        : f.type === "date" ? (f.lock ? "" : `${later.getFullYear()}-${pad(later.getMonth() + 1)}-${pad(later.getDate())}`)
         : isUserField(f) ? ((optionsFor(f)[0] || [])[1] || "")
         : f.type === "multiselect" ? (f.options || []).slice(0, 2).join("、")
         : isMultiPick(f) ? "工厂A、工厂B" : "";

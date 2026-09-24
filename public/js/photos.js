@@ -107,7 +107,25 @@ let upActive = 0; const upWaiters = [];
 async function upSlot() { if (upActive < 3) { upActive++; return; } await new Promise(r => upWaiters.push(r)); }
 function upRelease() { const next = upWaiters.shift(); if (next) next(); else upActive--; }
 
-function repaintPicker(ctx) { const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
+// 按位置对比，只改变了的节点：整块 innerHTML 会重建已有照片的 <img>，每次状态变化都闪一下
+function morphChildren(cur, next) {
+  const a = [...cur.childNodes], b = [...next.childNodes];
+  b.forEach((n, i) => {
+    const c = a[i];
+    if (!c) return cur.appendChild(n);
+    if (c.nodeName !== n.nodeName) return c.replaceWith(n);
+    if (c.nodeType !== 1) { if (c.nodeValue !== n.nodeValue) c.nodeValue = n.nodeValue; return; }
+    [...c.attributes].forEach(x => { if (!n.hasAttribute(x.name)) c.removeAttribute(x.name); });
+    [...n.attributes].forEach(x => { if (c.getAttribute(x.name) !== x.value) c.setAttribute(x.name, x.value); });
+    morphChildren(c, n);
+  });
+  a.slice(b.length).forEach(n => n.remove());
+}
+function repaintPicker(ctx) {
+  const el = $("pe-" + ctx); if (!el) return;
+  const tpl = document.createElement("template"); tpl.innerHTML = pickerInner(ctx);
+  morphChildren(el, tpl.content);
+}
 function flushPending(ctx) {
   const pend = photoPending[ctx] || [];
   photoDraft[ctx] = photoDraft[ctx] || [];
@@ -121,7 +139,7 @@ function flushPending(ctx) {
 }
 async function processPhoto(ctx, it) {
   try {
-    it.status = "work"; repaintPicker(ctx);
+    it.status = "work";  // 等待/压缩/上传的格子长得一样，状态变了不用重画
     if (!it.blob) {
       const job = compressChain.then(() => it.removed ? null : compressImage(it.file));
       compressChain = job.catch(() => { });
@@ -134,7 +152,7 @@ async function processPhoto(ctx, it) {
     await upSlot();
     try {
       if (it.removed) return;
-      it.status = "up"; it.pct = 0; repaintPicker(ctx);
+      it.status = "up";
       it.url = await uploadWithRetry(it.blob, p => {
         it.pct = p;
         const bar = document.querySelector(`#pp-${it.id} .ph-bar i`);
@@ -225,7 +243,7 @@ function editEntryModal(opts) {
   modal({ title: opts.title, okText: "保存", wide: true, keepOpenOnOk: true, onCancel: cleanup,
     html: `${opts.extraHtml || ""}${hasText ? `<textarea class="in" id="ee-text" placeholder="填写内容"
       style="margin-top:8px;min-height:90px">${esc(opts.text || "")}</textarea>` : ""}
-      <div class="ee-photos-label">照片 · 点 ✕ 删除，点「拍照」「相册」添加</div>${photoPicker(ctx)}`,
+      <div class="ee-photos">${photoPicker(ctx)}</div>`,
     onOk: async () => {
       if (photosBlocked(ctx)) return;
       const body = { photos: photoDraft[ctx] || [] };
@@ -262,7 +280,7 @@ Object.assign(A, {
   retryPhoto(ctx, id) {
     const it = (photoPending[ctx] || []).find(x => x.id === id);
     if (!it || it.status !== "err") return;
-    it.status = "wait"; it.err = ""; processPhoto(ctx, it);
+    it.status = "wait"; it.err = ""; it.pct = 0; processPhoto(ctx, it); repaintPicker(ctx);
   },
   cancelPhoto(ctx, id) {
     const pend = photoPending[ctx] || [], k = pend.findIndex(x => x.id === id);

@@ -39,6 +39,8 @@ function displayVal(o, f) {
 const isMultiPick = f => f.type === "multiselect" || f.type === "factory-fabric" || f.type === "factory-emb";
 const allFieldDefs = () => [...state.fields.order, ...state.fields.production];
 const scalarFields = s => state.fields[s].filter(f => f.type !== "log");
+// 字段在详情页哪张卡片：进度打卡 / 单独一栏(直接填，可能填后锁定) / 基本信息(点「编辑」改)
+const fieldCard = f => f.type === "log" ? "log" : f.quick ? "quick" : "info";
 function fieldInput(f, val, prefix) {
   prefix = prefix || "nf-";
   const id = prefix + f.k;
@@ -59,6 +61,12 @@ function fieldInput(f, val, prefix) {
   const kb = f.k === "qty" ? ` inputmode="numeric" pattern="[0-9,]*"`
     : f.k === "styleNo" ? ` autocapitalize="characters" autocorrect="off" spellcheck="false"` : "";
   return `<input class="in" id="${id}" value="${esc(val || "")}" autocomplete="off"${kb}>`;
+}
+// 读控件里的值：多选的隐藏框里是 JSON 数组，其余去掉首尾空格；控件不在页面上返回 undefined
+function readFieldInput(f, id) {
+  const el = $(id); if (!el) return undefined;
+  if (!isMultiPick(f)) return el.value.trim();
+  try { return JSON.parse(el.value || "[]"); } catch (e) { return []; }
 }
 const fieldRow = (f, val, prefix) => `<label class="field"><span>${esc(f.label)}</span>${fieldInput(f, val, prefix)}</label>`;
 
@@ -125,9 +133,8 @@ Object.assign(A, {
   collectScalars(section, into) {
     for (const f of scalarFields(section)) {
       if (f.type === "image") { into[f.k] = photoDraft.img || []; continue; }
-      const el = $("nf-" + f.k); if (!el) continue;
-      if (isMultiPick(f)) { try { into[f.k] = JSON.parse(el.value || "[]"); } catch (e) { into[f.k] = []; } continue; }
-      into[f.k] = el.value.trim();
+      const v = readFieldInput(f, "nf-" + f.k);
+      if (v !== undefined) into[f.k] = v;
     }
   },
   addMultiPick(id) {
@@ -143,9 +150,10 @@ Object.assign(A, {
   },
   rerenderMultiPick(id, arr) {
     const container = document.querySelector(`.multifactory[data-id="${CSS.escape(id)}"]`); if (!container) return;
-    const fKey = id.replace(/^(nf-|imp\d+-)/, "");
+    const fKey = id.replace(/^(nf-|qd-|imp\d+-)/, "");
     const f = allFieldDefs().find(x => x.k === fKey);
     if (!f) return;
     container.outerHTML = multiPickHtml(f, arr, id);
+    $(id).dispatchEvent(new Event("change", { bubbles: true }));  // 详情页单独一栏靠它保存
   },
 });

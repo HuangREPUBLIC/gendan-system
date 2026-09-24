@@ -55,14 +55,12 @@ function pushSectionHtml() {
         <div class="row-sub">要到手机的「设置 → 通知」里，把本应用的通知重新打开</div></div></div>`;
   } else if (pushState.on) {
     body = `<div class="row-item"><div class="row-main">
-        <div class="row-label">已开启</div>
-        <div class="row-sub">订单更新、同事发消息，App 没打开也会提醒你</div></div>
+        <div class="row-label">已开启</div></div>
         <span class="tag ok">开启中</span></div>
       <div class="btn-row"><button class="btn danger ghost" onclick="A.disablePush()">关闭通知</button></div>`;
   } else {
     body = `<div class="row-item"><div class="row-main">
-        <div class="row-label">未开启</div>
-        <div class="row-sub">开启后，订单更新和同事消息会像普通 App 一样提醒你</div></div></div>
+        <div class="row-label">未开启</div></div></div>
       <div class="btn-row"><button class="btn block" onclick="A.enablePush()">开启消息通知</button></div>`;
   }
   return `<section class="group"><div class="group-title">消息通知</div>

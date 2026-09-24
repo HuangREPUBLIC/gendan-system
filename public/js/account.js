@@ -13,8 +13,7 @@ function vAccount() {
 
   <section class="group">
     <div class="card"><div class="row-item tap" onclick="go('notifs')" role="button" tabindex="0">
-      <div class="row-main"><div class="row-label">消息通知</div>
-        <div class="row-sub">订单被同事更新时在这里提醒你</div></div>
+      <div class="row-main"><div class="row-label">消息通知</div></div>
       ${badgeHtml(state.notifs.unread)}<span class="chev">›</span></div></div>
   </section>
 

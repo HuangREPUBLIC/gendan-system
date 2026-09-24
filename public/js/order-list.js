@@ -42,8 +42,14 @@ function vOrders() {
   const recent = all.filter(o => isRecent(latestLog(o))).length;
   const pct = n => all.length ? Math.round(n / all.length * 100) + "%" : "—";
   // state.orders 已按权限过滤，合计的是自己能看到的
-  const qtySum = arr => arr.reduce((t, o) => t + (parseFloat(String(o.values.qty || "").replace(/[,，\s]/g, "")) || 0), 0)
-    .toLocaleString("zh-CN");
+  const sumOf = (arr, k) => arr.reduce((t, o) => t + (parseFloat(String(o.values[k] || "").replace(/[,，\s]/g, "")) || 0), 0);
+  const qtySum = arr => sumOf(arr, "qty").toLocaleString("zh-CN");
+  // 实发数量：发货那一栏(生产明细的单独一栏)里第一个数字字段，占比按件数算；还没加这个字段时按单数算
+  const shipQtyF = state.fields.production.find(f => f.quick && f.type === "number");
+  const totalQty = sumOf(all, "qty"), shippedQty = shipQtyF ? sumOf(all, shipQtyF.k) : 0;
+  const shippedSub = shipQtyF
+    ? `实发 ${shippedQty.toLocaleString("zh-CN")} 件 · 占 ${totalQty ? Math.round(shippedQty / totalQty * 100) + "%" : "—"}`
+    : "占 " + pct(shipped);
   // 点卡片按条件筛选，再点取消
   const statActive = k => k === "all" ? (!filt.ship && !filt.recent)
     : k === "recent" ? !!filt.recent : filt.ship === k;
@@ -57,7 +63,7 @@ function vOrders() {
   return `<section class="group dstats-wrap"><div class="dstats">
       ${statCard("all", "订单总数", all.length, "合计数量 " + qtySum(all) + " 件", ICONS.orders)}
       ${statCard("pending", "进行中", all.length - shipped, "尚未填写发货日期", ICONS.clock, "warn")}
-      ${statCard("shipped", "已发货", shipped, "占 " + pct(shipped), ICONS.truck, "ok")}
+      ${statCard("shipped", "已发货", shipped, shippedSub, ICONS.truck, "ok")}
       ${statCard("recent", "近7天有更新", recent, "占 " + pct(recent), ICONS.pulse, "sky")}
     </div></section>
   <section class="group">

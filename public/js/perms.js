@@ -10,7 +10,6 @@ const roleLabelOf = u => (u ? (u.roleLabel || (u.role === "admin" ? "管理员" 
 const labelForRoleKey = k => k === "admin" ? "管理员" : ((state.roles.find(r => r.k === k) || {}).label || k);
 
 function isSupervisor() { const u = me(); return !!u && u.template === "supervisor"; }
-function shipLocked(o) { return !!(o && o.values && o.values.shipDate); }
 const TEMPLATE_PERMS = {
   sales:      { scope: "own", editOrder: true,  editProd: false, logOrder: true,  logProd: false, createOrder: true, inspect: true },
   follower:   { scope: "own", editOrder: false, editProd: true,  logOrder: false, logProd: true,  createOrder: true, inspect: true },
@@ -55,11 +54,12 @@ function canTouchEntry(o, e, section) {
   if (e && e.by === u.id) return true;
   return canEditSection(o, section);
 }
-// 发货日期填写后只有管理员/主管能改
-function canEditShipDate(o) {
+const hasValue = v => v != null && v !== "" && !(Array.isArray(v) && !v.length);
+// 单独一栏的字段在详情页直接改；填后锁定的(发货日期等)本单有编辑权就能填，填了只有管理员/主管能改
+function canEditQuick(o, f, section) {
+  if (!f.lock) return canEditSection(o, section);
   if (isAdmin() || isSupervisor()) return true;
-  if (shipLocked(o)) return false;
-  return canEditBasic(o);
+  return !hasValue(o.values[f.k]) && canEditBasic(o);
 }
 const canWriteInspProblem = o => isRelated(o) && !!myPerms().inspect;
 const canWriteInspFix = canWriteInspProblem;

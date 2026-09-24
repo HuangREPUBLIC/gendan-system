@@ -293,13 +293,14 @@ async function apiAs(phone, method, p, body) {
   ok(app().includes("发货日期") && app().indexOf("包装进度") < app().indexOf("发货日期"), "发货日期排在包装进度后面");
 
   // 订单交期/发货日期：不进编辑页也能在详情页直接点选修改，编辑表单里不再重复出现
-  ok(!!doc.getElementById(`qd-${o1.id}-deadline`) && doc.getElementById(`qd-${o1.id}-deadline`).type === "date", "订单交期在详情页直接可点选(不用进编辑页)");
-  ok(!!doc.getElementById(`qd-${o1.id}-shipDate`) && doc.getElementById(`qd-${o1.id}-shipDate`).type === "date", "发货日期在详情页直接可点选(不用进编辑页)");
+  ok(!!doc.getElementById("qd-deadline") && doc.getElementById("qd-deadline").type === "date", "订单交期在详情页直接可点选(不用进编辑页)");
+  ok(!!doc.getElementById("qd-shipDate") && doc.getElementById("qd-shipDate").type === "date", "发货日期在详情页直接可点选(不用进编辑页)");
   A.toggleBasic(); await sleep(150);
   ok(!app().includes('id="nf-deadline"') && !app().includes('id="nf-shipDate"'), "编辑表单里不再重复出现订单交期/发货日期");
-  ok(!!doc.getElementById(`qd-${o1.id}-deadline`) && !!doc.getElementById(`qd-${o1.id}-shipDate`), "编辑模式下日期字段仍在详情页可直接点选");
+  ok(!!doc.getElementById("qd-deadline") && !!doc.getElementById("qd-shipDate"), "编辑模式下日期字段仍在详情页可直接点选");
   A.toggleBasic(); await sleep(150); // 退出编辑模式，不保存
-  await A.quickSetDate(o1.id, "deadline", "2026-09-01"); await sleep(400);
+  doc.getElementById("qd-deadline").value = "2026-09-01";
+  doc.getElementById("qd-deadline").dispatchEvent(new window.Event("change", { bubbles: true })); await sleep(400);
   ok(st().orders.find(x => x.id === o1.id).values.deadline === "2026-09-01", "直接点选交期后立即生效，无需进编辑页/点保存");
   window.go("detail", o1.id); await sleep(300);
   ok(app().includes("2026年9月1日"), "页面上交期显示为新值");

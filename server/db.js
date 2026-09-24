@@ -196,6 +196,12 @@ function ensureDefaults() {
         const n = fields.order.length;
         fields.order = fields.order.filter(f => !["mainProcess", "mainWorkers", "mainEstDone"].includes(f.k));
         return fields.order.length !== n;
+      }],
+      // 订单交期、发货日期各在单独一栏直接填(quick)，发货日期填了就锁定(lock)；挪过位置的字段 quick 已有值，不再动
+      ["订单交期/发货日期标记为单独一栏", () => {
+        const fs = [...fields.order, ...fields.production].filter(f => f.quick === undefined && (f.k === "deadline" || f.k === "shipDate"));
+        fs.forEach(f => { f.quick = true; f.lock = f.k === "shipDate"; });
+        return fs.length > 0;
       }]
     ];
     let changed = false;
@@ -304,7 +310,7 @@ function seedIfEmpty() {
       { k: "style", label: "款式", type: "text" },
       { k: "qty", label: "数量", type: "number" },
       { k: "desc", label: "款式描述", type: "textarea" },
-      { k: "deadline", label: "订单交期", type: "date" },
+      { k: "deadline", label: "订单交期", type: "date", quick: true, lock: false },
       { k: "fabricProg", label: "面料进度", type: "log" },
       { k: "embProg", label: "绣印进度", type: "log" },
       { k: "preSample", label: "产前样进度", type: "log" },
@@ -319,7 +325,7 @@ function seedIfEmpty() {
       { k: "cutting", label: "裁剪进度", type: "log" },
       { k: "ironing", label: "整烫进度", type: "log" },
       { k: "packing", label: "包装进度", type: "log" },
-      { k: "shipDate", label: "发货日期", type: "date" }
+      { k: "shipDate", label: "发货日期", type: "date", quick: true, lock: true }
     ]
   });
 

@@ -69,8 +69,6 @@ function adminRequired(req, res, next) {
  * perms 决定能做什么(管理员在「管理 → 权限」里逐项开关，未配置时按模板默认) */
 const isAdmin = (u) => u && u.role === "admin";
 const isSupervisor = (u) => u && templateOf(u) === "supervisor";
-// 发货日期填写后只锁这一个字段
-const shipLocked = (order) => !!((order && order.data && order.data.values) || {}).shipDate;
 
 const TEMPLATE_PERMS = {
   sales:      { scope: "own", editOrder: true,  editProd: false, logOrder: true,  logProd: false, createOrder: true, inspect: true },
@@ -125,7 +123,7 @@ const canWriteInspFix = canWriteInspProblem;
 
 module.exports = {
   hashPassword, verifyPassword, signToken, userPublic,
-  authRequired, adminRequired, isAdmin, isSupervisor, shipLocked,
+  authRequired, adminRequired, isAdmin, isSupervisor,
   canEditBasic, canEditSection, canAddLog, canTouchEntry, canViewOrder,
   roleTemplate, canWriteInspProblem, canWriteInspFix,
   canCreateOrder, PERM_KEYS

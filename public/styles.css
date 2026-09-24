@@ -400,7 +400,6 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 .imp-drop-sub{font-size:var(--fs-cap);color:var(--ink-2)}
 .imp-drop-desk{display:none}
 @media (hover:hover) and (pointer:fine){ .imp-drop-desk{display:inline} }
-.imp-help{font-size:var(--fs-sub);color:var(--ink-2);margin:10px 2px 0;line-height:1.5;text-wrap:pretty}
 .imp-paste{margin-top:10px}
 .imp-paste summary{cursor:pointer;color:var(--blue-2);font-size:var(--fs-sm);padding:6px 2px;list-style:none;min-height:36px;display:flex;align-items:center}
 .imp-paste summary::-webkit-details-marker{display:none}
@@ -436,7 +435,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 .modal{background:var(--card);border-radius:var(--radius-lg);max-width:340px;width:100%;padding:20px;
   box-shadow:var(--shadow-pop);max-height:86vh;overflow-y:auto}
 .modal.wide{max-width:520px}
-.ee-photos-label{margin-top:12px;font-size:var(--fs-cap);color:var(--ink-2)}
+.ee-photos{margin-top:12px}
 .m-title{font-weight:600;font-size:var(--fs-lg);text-align:center}
 .m-body{color:var(--ink-2);font-size:var(--fs-sm);margin-top:7px;text-align:center;line-height:1.45}
 .m-actions{display:flex;gap:10px;margin-top:18px}

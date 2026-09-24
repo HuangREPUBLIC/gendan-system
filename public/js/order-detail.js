@@ -49,35 +49,30 @@ function subCardHtml(o, s, canProdLog) {
 function vDetail() {
   const o = state.orders.find(x => x.id === route.id);
   if (!o) return `<div class="card"><div class="empty">订单不存在</div></div>`;
-  const scalars = scalarFields;
-  const logsOf = s => state.fields[s].filter(f => f.type === "log");
+  const cardFields = (s, card) => state.fields[s].filter(f => fieldCard(f) === card);
   const canEditOrd = canEditSection(o, "order");
   const canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
   const canInsp = canWriteInspProblem(o), canFix = canWriteInspFix(o);
-  // 订单交期/发货日期可在详情页直接选
-  const isQuickDateField = f => f.k === "deadline" || f.k === "shipDate";
-  const kv = (fs, canEditThis) => fs.map(f => {
-    const isShipDateRow = f.k === "shipDate";
-    const rowStyle = isShipDateRow ? ` style="border-bottom:0"` : "";
-    // 发货日期已锁定且有权改时显示「清空」
-    const showClearBtn = isShipDateRow && canEditThis && shipLocked(o);
-    const clearBtn = showClearBtn ? `<button class="btn mini ghost" onclick="A.clearShipDate('${o.id}')">清空</button>` : "";
-    const row = isQuickDateField(f) && canEditThis
-      ? `<div class="row-item"${rowStyle}><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
-          <div class="row-value" style="display:flex;align-items:center;gap:10px">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}${clearBtn}</div></div>`
-      : `<div class="row-item"${rowStyle}><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
-          <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`;
-    const warn = isShipDateRow ? `<div style="margin:0 16px 12px;padding:10px 14px;border-radius:var(--radius);background:var(--bad-soft);color:var(--bad);font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px">
-        <span>⚠️</span><span>发货日期一旦选择，不可以再次修改</span></div>` : "";
-    return row + warn;
-  }).join("");
-  const editForm = s => `<div class="grid2">${scalars(s).filter(f => !isQuickDateField(f)).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
+  const rowHtml = (f, value) => `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>${value}</div>`;
+  const readonlyVal = f => `<div class="row-value">${esc(displayVal(o, f)) || "—"}</div>`;
+  // 款式图在抬头显示，这里不重复
+  const infoRows = s => cardFields(s, "info").filter(f => f.type !== "image").map(f => rowHtml(f, readonlyVal(f))).join("");
+  // 单独一栏：有权就直接改、改完即存；填后锁定的已填时，管理员/主管可「清空」解锁
+  const quickCard = s => {
+    const fs = cardFields(s, "quick");
+    if (!fs.length) return "";
+    const rows = fs.map(f => {
+      if (!canEditQuick(o, f, s)) return rowHtml(f, readonlyVal(f));
+      const clearBtn = f.lock && hasValue(o.values[f.k]) ? `<button class="btn mini ghost" onclick="A.clearLocked('${o.id}','${f.k}')">清空</button>` : "";
+      return rowHtml(f, `<div class="row-value" style="display:flex;align-items:center;gap:10px" onchange="A.quickSet('${o.id}','${f.k}')">${fieldInput(f, o.values[f.k], "qd-")}${clearBtn}</div>`);
+    }).join("");
+    const warn = fs.some(f => f.lock) ? `<div style="margin:0 16px 12px;padding:10px 14px;border-radius:var(--radius);background:var(--bad-soft);color:var(--bad);font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px">
+        <span>⚠️</span><span>这一栏一旦填写，不可以再次修改</span></div>` : "";
+    return `<div class="card" style="margin-top:14px"><div>${rows}</div>${warn}</div>`;
+  };
+  const editForm = s => `<div class="grid2">${cardFields(s, "info").map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
   const photos = normalizePhotos(o.values.img);
   const headerThumb = coverImgHtml(photos, "header-thumb");
-  const dateFieldsProd = scalars("production").filter(isQuickDateField);
-  const topProdScalars = scalars("production").filter(f => !isQuickDateField(f));
-  const orderKvFields = scalars("order").filter(f => f.type !== "image" && !isQuickDateField(f));
-  const dateFieldsOrder = scalars("order").filter(isQuickDateField);
 
   return `<section class="group g-head">
     <div class="card"><div class="card-pad" style="display:flex;align-items:center;gap:14px">
@@ -94,9 +89,9 @@ function vDetail() {
     <div class="card">${editingBasic && canEditOrd
       ? `<label class="field"><span>订单季节</span>${seasonSelectHtml(o.season)}</label>${editForm("order")}
          <div class="btn-row"><button class="btn" onclick="A.saveBasic('${o.id}')">保存修改</button></div>`
-      : kv(orderKvFields, canEditOrd)}</div>
-    ${dateFieldsOrder.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsOrder, canEditOrd)}</div>` : ""}
-    <div class="card" style="margin-top:14px">${logsOf("order").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canOrdLog, "order")).join("")}</div>
+      : infoRows("order")}</div>
+    ${quickCard("order")}
+    <div class="card" style="margin-top:14px">${cardFields("order", "log").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canOrdLog, "order")).join("")}</div>
   </section>
 
   <section class="group g-prod">
@@ -104,9 +99,9 @@ function vDetail() {
       <span style="margin-left:8px;font-size:12.5px;color:var(--ink-2)">${o.values.follower ? `负责人 ${esc(uname(o.values.follower))}` : "未指定下厂员"}</span></div>
     <div class="card">${editingFollower && canEditOrd
       ? `${editForm("production")}<div class="btn-row"><button class="btn" onclick="A.saveBasic('${o.id}')">保存修改</button></div>`
-      : kv(topProdScalars, false)}</div>
+      : infoRows("production")}</div>
     <div class="card" style="margin-top:14px">
-      ${logsOf("production").filter(f => f.k === "cutting").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
+      ${cardFields("production", "log").filter(f => f.k === "cutting").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
       <div class="prodgroup-title"><span><span class="lf-dot"></span>生产进度</span></div>
       <div class="logfield" style="padding-top:0">
         <div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
@@ -119,9 +114,9 @@ function vDetail() {
         ${canProdLog ? `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
           <button class="btn mini ghost" onclick="A.addSubPrompt('${o.id}')">＋ 添加加工点</button></div>` : ""}
       </div>
-      ${logsOf("production").filter(f => f.k !== "cutting").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
+      ${cardFields("production", "log").filter(f => f.k !== "cutting").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog, "production")).join("")}
     </div>
-    ${dateFieldsProd.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsProd, canEditShipDate(o))}</div>` : ""}
+    ${quickCard("production")}
   </section>
 
   <section class="group g-insp">
@@ -154,12 +149,22 @@ function vDetail() {
 }
 
 Object.assign(A, {
-  async quickSetDate(oid, key, val) {
-    await run(() => api("PATCH", "/orders/" + oid, { values: { [key]: val } }), "已更新");
+  // 单独一栏里改了就存；填后锁定的字段头一次填要先确认，取消就恢复原样
+  quickSet(oid, key) {
+    const o = state.orders.find(x => x.id === oid), f = allFieldDefs().find(x => x.k === key);
+    if (!o || !f) return;
+    const val = readFieldInput(f, "qd-" + key), cur = o.values[key];
+    const norm = v => hasValue(v) ? JSON.stringify(v) : "";
+    if (val === undefined || norm(val) === norm(cur)) return;
+    const save = () => run(() => api("PATCH", "/orders/" + oid, { values: { [key]: val } }), "已更新");
+    if (!f.lock || hasValue(cur)) return save();
+    modal({ title: `确认${f.label}：${displayVal({ values: { [key]: val } }, f)}`, body: "填写后不可以再次修改。",
+      okText: "确认", onOk: save, onCancel: render });
   },
-  clearShipDate(oid) {
-    confirmDanger("清空发货日期？", "清空后这个字段会解锁，可以重新选择发货日期。",
-      () => run(() => api("PATCH", "/orders/" + oid, { values: { shipDate: "" } }), "发货日期已清空"), "确认清空");
+  clearLocked(oid, key) {
+    const f = allFieldDefs().find(x => x.k === key); if (!f) return;
+    confirmDanger(`清空${f.label}？`, "清空后这一项会解锁，可以重新填写。",
+      () => run(() => api("PATCH", "/orders/" + oid, { values: { [key]: "" } }), `${f.label}已清空`), "确认清空");
   },
 
   toggleBasic() {
@@ -230,7 +235,7 @@ Object.assign(A, {
   },
 
   addSubPrompt(oid) {
-    askText({ title: "添加加工点", body: "给这个加工点起个名字，比如「绣花外发点」「二次印花点」。", okText: "添加" },
+    askText({ title: "添加加工点", okText: "添加" },
       name => run(() => api("POST", `/orders/${oid}/subs`, { name }), "已添加加工点：" + name));
   },
   renameSub(oid, subId) {

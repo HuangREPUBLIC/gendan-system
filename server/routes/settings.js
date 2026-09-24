@@ -16,6 +16,13 @@ function placeField(list, f, after) {
   list.splice(after === "" ? 0 : list.findIndex(x => x.k === after) + 1, 0, f);
   return true;
 }
+// 放在谁后面就进谁那张卡片：照抄它的「单独一栏(quick)」「填后锁定(lock)」；打卡字段只在打卡那张，不用标
+function joinCard(list, f, after) {
+  if (f.type === "log") return;
+  const prev = list.find(x => x.k === after);
+  const same = !!prev && prev.type !== "log";
+  f.quick = same && !!prev.quick; f.lock = same && !!prev.lock;
+}
 const cleanOptions = options => [...new Set((Array.isArray(options) ? options : []).map(s => String(s).trim()).filter(Boolean))];
 
 router.post("/fields", A.adminRequired, (req, res) => {
@@ -34,6 +41,7 @@ router.post("/fields", A.adminRequired, (req, res) => {
   }
   fields[section].push(f);
   if (!placeField(fields[section], f, after)) return res.status(400).json({ error: "要放在后面的字段不存在" });
+  joinCard(fields[section], f, after);
   setSetting("fields", fields);
   if (type === "log") {  // 已有订单补上该进度字段
     db.prepare("SELECT id, data FROM orders").all().forEach(r => {
@@ -88,6 +96,7 @@ router.patch("/fields/:section/:key", A.adminRequired, (req, res) => {
   f.label = lb;
   const fromType = f.type; f.type = type;
   if (options) f.options = options; else delete f.options;
+  if (body.after !== undefined) joinCard(fields[section], f, body.after);
   // 字段配置和订单数据一起改，要么全改要么全不改
   db.exec("BEGIN");
   try {

@@ -209,13 +209,14 @@ router.patch("/orders/:id", withOrder, (req, res) => {
   }
   if (values && typeof values === "object") {
     for (const key of Object.keys(values)) {
-      if (key === "shipDate") {
-        // 发货日期填写后只有管理员/主管能改
-        if (A.shipLocked(o) && !A.isAdmin(req.user) && !A.isSupervisor(req.user)) {
-          return res.status(403).json({ error: "发货日期一经填写，只有管理员或主管能再修改" });
+      const f = fieldOf(key);
+      // 填后锁定的字段(发货日期等)：本单有编辑权就能填，填了只有管理员/主管能改
+      if (f && f.lock) {
+        if (!sameValue(o.data.values[key], "") && !A.isAdmin(req.user) && !A.isSupervisor(req.user)) {
+          return res.status(403).json({ error: `「${f.label}」一经填写，只有管理员或主管能再修改` });
         }
         if (!A.canEditBasic(req.user, o)) {
-          return res.status(403).json({ error: "无权修改发货日期" });
+          return res.status(403).json({ error: `无权填写「${f.label}」` });
         }
         continue;
       }

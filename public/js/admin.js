@@ -106,14 +106,24 @@ function fieldTypeFormHtml(prefix, f) {
     <label class="field" id="${prefix}-opts-wrap"${fieldHasOptions(type) ? "" : ` style="display:none"`}><span>下拉选项（逗号分隔）</span>
       <input class="in" id="${prefix}-opts" placeholder="例：选项A,选项B" value="${esc(f && f.options ? f.options.join(",") : "")}"></label>`;
 }
-// 字段位置：放在本板块哪个字段后面；修改时默认选当前位置
-function fieldAfterHtml(prefix, section, f) {
-  const list = state.fields[section].filter(x => x !== f);
-  const i = f ? state.fields[section].indexOf(f) : -1;
-  const cur = f ? (i > 0 ? state.fields[section][i - 1].k : "") : (list.length ? list[list.length - 1].k : "");
+// 详情页里每个板块的卡片顺序(同 vDetail)
+const CARD_ORDER = { order: ["info", "quick", "log"], production: ["info", "log", "quick"] };
+function cardLabel(section, card) {
+  if (card !== "quick") return card === "log" ? "进度打卡" : "基本信息";
+  return state.fields[section].some(f => f.quick && f.lock) ? "单独一栏 · 填后锁定" : "单独一栏";
+}
+// 字段位置：按卡片分组，只列这种类型能进的卡片(打卡字段只进打卡那张)，放在谁后面就进谁那张卡片；
+// 修改时默认不挪，新加时默认放在第一张卡片最后
+function fieldAfterHtml(prefix, section, f, type) {
+  const groups = (type === "log" ? ["log"] : ["info", "quick"])
+    .map(c => [c, state.fields[section].filter(x => x !== f && fieldCard(x) === c)]);
+  const first = groups[0][1];
+  const cur = f ? "keep" : (first.length ? first[first.length - 1].k : "");
+  const opt = (v, t) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(t)}</option>`;
   return `<label class="field"><span>放在哪个字段后面</span><select class="in" id="${prefix}-after">
-    <option value="" ${cur === "" ? "selected" : ""}>放在最前面</option>
-    ${list.map(x => `<option value="${esc(x.k)}" ${x.k === cur ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select></label>`;
+    ${f ? opt("keep", "不挪位置") : ""}${opt("", "放在最前面")}
+    ${groups.filter(([, fs]) => fs.length).map(([c, fs]) =>
+      `<optgroup label="${esc(cardLabel(section, c))}">${fs.map(x => opt(x.k, x.label)).join("")}</optgroup>`).join("")}</select></label>`;
 }
 const readFieldOptions = (prefix, type) => fieldHasOptions(type)
   ? $(prefix + "-opts").value.split(/[,，、]/).map(s => s.trim()).filter(Boolean) : undefined;
@@ -128,11 +138,13 @@ function adminFormHtml() {
     <div class="card cf-split">
       <div class="cf-lists">${["order", "production"].map(s => `<div class="card-pad" style="padding-bottom:6px">
         <div class="row-sub" style="margin-bottom:6px">${s === "order" ? "一、订单明细" : "二、生产明细"}</div>
-        <div class="chip-wall">${state.fields[s].map(f => fieldChipHtml(s, f)).join("")}</div></div>`).join("")}
-        <div class="row-sub card-pad" style="padding-top:0">点字段名可以修改名称、类型和位置</div></div>
+        ${CARD_ORDER[s].map(c => {
+          const fs = state.fields[s].filter(f => fieldCard(f) === c);
+          return fs.length ? `<div class="chip-wall" style="margin-bottom:8px"><span class="row-sub">${esc(cardLabel(s, c))}</span>${fs.map(f => fieldChipHtml(s, f)).join("")}</div>` : "";
+        }).join("")}</div>`).join("")}</div>
       <div class="cf-form">
       <label class="field"><span>添加到板块</span><select class="in" id="cf-sec" onchange="A.syncFieldAfter()"><option value="order">一、订单明细</option><option value="production">二、生产明细</option></select></label>
-      <div id="cf-after-wrap">${fieldAfterHtml("cf", "order")}</div>
+      <div id="cf-after-wrap">${fieldAfterHtml("cf", "order", null, "text")}</div>
       <label class="field"><span>字段名称</span><input class="in" id="cf-label" placeholder="例：吊牌进度"></label>
       ${fieldTypeFormHtml("cf")}
       <div class="btn-row"><button class="btn" onclick="A.addField()">添加字段</button></div></div></div>
@@ -161,12 +173,10 @@ function adminDataHtml() {
   return `<section class="group a-export">
     <div class="group-title">数据导出</div>
     <div class="card"><div class="card-pad">
-      <p class="row-sub" style="margin:0 0 12px">导出订单全部内容（订单基本信息、生产进度、验货问题、跟单小结）为 Excel(.xlsx) 文件，照片直接嵌在表格里</p>
       <label class="field" style="padding-left:0;padding-right:0;border:0"><span>按季节筛选（可选）</span>
         <select class="in" id="exp-season"><option value="">全部季节</option>${
           seasonOptions("").map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></label>
-      <button class="btn" id="exp-btn" onclick="A.exportData()"><span class="btn-spin" aria-hidden="true"></span><span>导出订单数据</span></button>
-      <p class="row-sub" style="margin:10px 0 0">文件会交给浏览器下载；在微信里打开本系统时无法下载，请先用浏览器打开</p></div></div>
+      <button class="btn" id="exp-btn" onclick="A.exportData()"><span class="btn-spin" aria-hidden="true"></span><span>导出订单数据</span></button></div></div>
   </section>`;
 }
 
@@ -239,8 +249,14 @@ Object.assign(A, {
   },
   syncFieldOpts(prefix) {
     $(prefix + "-opts-wrap").style.display = fieldHasOptions($(prefix + "-type").value) ? "" : "none";
+    if (prefix === "cf") A.syncFieldAfter();  // 打卡和其它类型能放的卡片不同
   },
-  syncFieldAfter() { $("cf-after-wrap").innerHTML = fieldAfterHtml("cf", $("cf-sec").value); },
+  // 换板块/类型后重列位置，原来选的还在就保留
+  syncFieldAfter() {
+    const prev = $("cf-after").value;
+    $("cf-after-wrap").innerHTML = fieldAfterHtml("cf", $("cf-sec").value, null, $("cf-type").value);
+    if ([...$("cf-after").options].some(o => o.value === prev)) $("cf-after").value = prev;
+  },
   async addField() {
     const section = $("cf-sec").value, label = $("cf-label").value.trim(), type = $("cf-type").value, after = $("cf-after").value;
     if (!label) return toast("请填写字段名称");
@@ -253,10 +269,10 @@ Object.assign(A, {
     modal({ title: `修改字段「${f.label}」`, okText: "保存", keepOpenOnOk: true,
       html: `<label class="field"><span>字段名称</span><input class="in" id="ef-label" value="${esc(f.label)}"></label>
         ${fieldTypeFormHtml("ef", f)}
-        ${fieldAfterHtml("ef", section, f)}
-        <div class="row-sub">改成选人类型后，订单里已填的姓名会自动对应到员工。</div>`,
+        ${fieldAfterHtml("ef", section, f, f.type)}`,
       onOk: async () => {
-        const label = $("ef-label").value.trim(), type = $("ef-type").value, after = $("ef-after").value;
+        const label = $("ef-label").value.trim(), type = $("ef-type").value;
+        const after = $("ef-after").value === "keep" ? undefined : $("ef-after").value;
         if (!label) return toast("请填写字段名称");
         const options = readFieldOptions("ef", type);
         if (options && !options.length) return toast("请填写下拉选项");

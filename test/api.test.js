@@ -285,6 +285,26 @@ async function call(method, path, token, body) {
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { shipDate: "2026-09-08" } })).status === 200, "清空后重新解锁，业务员能再次设置发货日期");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { desc: "管理员改的" } })).status === 200, "管理员仍能修改已锁定订单的其它内容");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { shipDate: "2026-09-10" } })).status === 200, "管理员仍能修改已锁定的发货日期本身");
+
+  // ---- 字段放在谁后面就进谁那张卡片；发货那栏的新字段跟发货日期一样填后锁定 ----
+  const pf = (await call("GET", "/bootstrap", aT)).j.fields;
+  ok(pf.order.find(f => f.k === "deadline").quick && !pf.order.find(f => f.k === "deadline").lock, "订单交期是单独一栏，不锁定");
+  ok(pf.production.find(f => f.k === "shipDate").quick && pf.production.find(f => f.k === "shipDate").lock, "发货日期是单独一栏，填后锁定");
+  const sq = (await call("POST", "/fields", aT, { section: "production", label: "真实发货数量", type: "number", after: "shipDate" })).j.production;
+  const sqF = sq.find(f => f.label === "真实发货数量");
+  ok(sqF.quick && sqF.lock && sq.indexOf(sqF) === sq.findIndex(f => f.k === "shipDate") + 1, "放在发货日期后面的新字段进发货那栏，也是填后锁定");
+  const ib = (await call("POST", "/fields", aT, { section: "production", label: "工厂联系人", type: "text", after: "follower" })).j.production.find(f => f.label === "工厂联系人");
+  ok(!ib.quick && !ib.lock, "放在下厂员后面的新字段进第一张卡片，不锁定");
+  const renamed = (await call("PATCH", `/fields/production/${sqF.k}`, aT, { label: "实发数量" })).j.production.find(f => f.k === sqF.k);
+  ok(renamed.quick && renamed.lock, "只改名不传位置时留在原来那栏");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { [sqF.k]: "1180" } })).status === 200, "业务员能填还空着的实发数量");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, sT, { values: { [sqF.k]: "1200" } })).status === 403, "实发数量填了之后业务员不能再改");
+  await call("PATCH", `/orders/${lockOrder.j.id}`, fT, { values: { [ib.k]: "张三" } });
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, fT, { values: { [ib.k]: "李四" } })).status === 200, "不锁定的新字段填了还能再改");
+  ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { [sqF.k]: "1200" } })).status === 200, "管理员能改已锁定的实发数量");
+  const mvOut = (await call("PATCH", `/fields/production/${sqF.k}`, aT, { after: "follower" })).j.production.find(f => f.k === sqF.k);
+  ok(!mvOut.quick && !mvOut.lock, "挪到下厂员后面就离开发货那栏，不再锁定");
+  await call("DELETE", `/fields/production/${sqF.k}`, aT); await call("DELETE", `/fields/production/${ib.k}`, aT);
   await call("PATCH", `/users/${liu.id}`, aT, { role: "follower" }); // 测试收尾，把刘敏职位改回去
   await call("DELETE", `/roles/${supRoleK}`, aT); // 清理掉测试用的临时职位，避免影响其它测试文件对职位数量的断言(同一个 npm test 进程里所有测试文件共用一个服务端/数据库)
   // 上面创建的"测试业务员职位"没有人用，直接清理
