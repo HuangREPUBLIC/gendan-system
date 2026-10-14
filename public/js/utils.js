@@ -45,9 +45,16 @@ function toast(s, sticky) {
   if (!sticky) toast._t = setTimeout(() => m.classList.remove("show"), 2400);
 }
 
+// 正在用输入法拼字(中文拼音等)的输入框：拼字途中重画会换掉它，拼到一半的字被打断，中文就打不进去
+let imeTarget = null;
+document.addEventListener("compositionstart", e => { imeTarget = e.target; }, true);
+document.addEventListener("compositionend", () => { imeTarget = null; }, true);
+
 function rerenderKeepFocus(inputId, redraw) {
   clearTimeout(rerenderKeepFocus.t);
-  rerenderKeepFocus.t = setTimeout(() => {
+  rerenderKeepFocus.t = setTimeout(function draw() {
+    // 还在拼字就等选完字再画；选字那次输入已经把最终的字记下了
+    if (imeTarget && imeTarget === $(inputId)) { rerenderKeepFocus.t = setTimeout(draw, 300); return; }
     (redraw || render)();
     const inp = $(inputId);
     if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }

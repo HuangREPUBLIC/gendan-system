@@ -91,6 +91,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await window.api("DELETE", "/users/" + quit.id); await window.refresh();
   window.go("orders"); await sleep(200);
   ok(app().includes("业务员 离职小张"), "订单列表里离职员工仍显示原名");
+  const salesFilterOpts = () => [...doc.querySelectorAll('select[aria-label="按业务员筛选"] option')].map(o => o.value + ":" + o.textContent);
+  ok(salesFilterOpts().includes(quit.id + ":离职小张（已离职）"), "业务员筛选里列出还挂着订单的离职员工");
+  A.setF("sales", quit.id); await sleep(150);
+  ok(app().includes("E2E-QUIT") && app().includes("共 1 单"), "选他就筛出他名下的订单");
+  A.setF("sales", ""); await sleep(150);
   window.go("detail", qo.id); await sleep(200);
   ok(app().includes("离职小张") && !app().includes(quit.id), "详情页显示离职员工原名，不是一串乱码");
   A.toggleBasic(); await sleep(150);
@@ -98,7 +103,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   ok(salesSel.value === quit.id && salesSel.selectedOptions[0].textContent === "离职小张（已离职）", "编辑时业务员下拉仍选着他，并标明已离职");
   await A.saveBasic(qo.id); await sleep(400);
   ok(st().orders.find(o => o.id === qo.id).values.sales === quit.id, "保存修改不会把离职员工从订单上清掉");
-  await window.api("DELETE", "/orders/" + qo.id);
+  await window.api("DELETE", "/orders/" + qo.id); await window.refresh();
+  window.go("orders"); await sleep(200);
+  ok(salesFilterOpts().length > 1 && !salesFilterOpts().some(x => x.startsWith(quit.id)), "离职员工名下没有订单了，筛选里就不再列出");
 
   // 看订单范围可以按人单独设置
   window.go("admin"); A.setAdminTab("people"); await sleep(200);

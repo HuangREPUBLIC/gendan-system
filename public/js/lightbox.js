@@ -64,6 +64,19 @@ function lbSlideHtml(k) {
       onload="this.parentNode.classList.add('ok')" onerror="this.parentNode.classList.add('bad')">
     <span class="lb-fail">图片加载失败</span></div>`;
 }
+const lbFileName = i => "照片" + (i + 1) + "." + ((lightbox.photos[i].split(".").pop() || "jpg").slice(0, 4));
+// 苹果手机上下载的图片进的是「文件」不是相册：改走系统分享(面板里有「存储图像」)。
+// 分享只能在点按当下调起，等点了再去取图会被拦，所以显示这张时就先取好
+const lbCanShareSave = () => isIOSDevice() && !inAppBrowser() && !!navigator.canShare;
+function lbPrepShare(i) {
+  const url = lightbox.photos[i];
+  if (!lbCanShareSave() || (lightbox.share && lightbox.share.url === url)) return;
+  const share = lightbox.share = { url, file: null };
+  fetch(url).then(r => r.ok ? r.blob() : null).then(b => {
+    const f = b && new File([b], lbFileName(i), { type: b.type || "image/jpeg" });
+    if (f && navigator.canShare({ files: [f] })) share.file = f;
+  }).catch(() => { }).finally(() => { share.done = true; });
+}
 function lbChrome() {
   const el = LB.el; if (!el || !lightbox) return;
   const { photos, i } = lightbox;
@@ -71,7 +84,7 @@ function lbChrome() {
   // 保存按钮只对本系统图片地址开放
   const save = el.querySelector(".lb-save"), safe = /^(\/uploads\/|blob:)/.test(photos[i]);
   save.hidden = !safe;
-  if (safe) { save.href = photos[i]; save.setAttribute("download", "照片" + (i + 1) + "." + ((photos[i].split(".").pop() || "jpg").slice(0, 4))); }
+  if (safe) { save.href = photos[i]; save.setAttribute("download", lbFileName(i)); lbPrepShare(i); }
   else save.removeAttribute("href");
   el.querySelector(".lb-nav.prev").hidden = i <= 0;
   el.querySelector(".lb-nav.next").hidden = i >= photos.length - 1;
@@ -261,7 +274,7 @@ function openLightbox(photos, i, fromRect) {
     el.setAttribute("role", "dialog"); el.setAttribute("aria-modal", "true"); el.setAttribute("aria-label", "查看照片");
     el.innerHTML = `<div class="lb-track"></div>
       <div class="lb-bar"><span class="lb-count num"></span><span class="lb-acts">
-        <a class="lb-btn lb-save" aria-label="保存照片" title="保存照片">${PHOTO_ICONS.save}</a>
+        <a class="lb-btn lb-save" aria-label="保存照片" title="保存照片" onclick="A.lbSave(event)">${PHOTO_ICONS.save}</a>
         <button type="button" class="lb-btn lb-close" aria-label="关闭" onclick="A.closeLightbox()">✕</button></span></div>
       <button type="button" class="lb-nav prev" aria-label="上一张" onclick="A.lbStep(-1)">‹</button>
       <button type="button" class="lb-nav next" aria-label="下一张" onclick="A.lbStep(1)">›</button>`;
@@ -307,5 +320,16 @@ Object.assign(A, {
     openLightbox(photos, +el.getAttribute("data-i") || 0, el.getBoundingClientRect ? el.getBoundingClientRect() : null);
   },
   lbStep(d) { lbGo(d); },
+  // 保存照片：电脑、安卓照常下载；苹果手机走系统分享；微信等内置浏览器下载不了，提示长按保存
+  lbSave(e) {
+    if (inAppBrowser()) { e.preventDefault(); return toast("请长按图片，选「保存图片」"); }
+    if (!isIOSDevice()) return;
+    e.preventDefault();
+    const s = lightbox && lightbox.share, mine = !!s && s.url === lightbox.photos[lightbox.i];
+    const longPress = () => toast("请长按图片，选「添加到照片」");
+    if (mine && s.file) return navigator.share({ files: [s.file] }).catch(err => { if (!err || err.name !== "AbortError") longPress(); });
+    if (mine && !s.done) return toast("图片还在加载，请稍后再点");
+    longPress();  // 老版本 iOS 分享不了图片
+  },
   closeLightbox(dir, vy) { closeLightboxNow(dir || 0, vy || 0, false); },
 });

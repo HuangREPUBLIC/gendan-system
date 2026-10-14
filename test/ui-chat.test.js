@@ -69,6 +69,20 @@ async function apiAs(phone, method, p, body) {
   ok(!app().includes("SS27-T012"), "货号/款式名搜索框不再匹配工厂名");
   A.setFKw(""); await sleep(400);
 
+  // ---- 中文输入法：拼音还没选字时不能重画(重画会换掉输入框，拼到一半被打断，中文就打不进去) ----
+  const kwBox = doc.getElementById("flt-kw");
+  kwBox.focus();
+  kwBox.dispatchEvent(new window.Event("compositionstart", { bubbles: true }));
+  kwBox.value = "li"; kwBox.dispatchEvent(new window.Event("input", { bubbles: true }));
+  await sleep(700);
+  ok(doc.getElementById("flt-kw") === kwBox, "拼音还没选字时搜索框不会被重画(拼字不被打断)");
+  kwBox.value = "李"; kwBox.dispatchEvent(new window.Event("input", { bubbles: true }));
+  kwBox.dispatchEvent(new window.Event("compositionend", { bubbles: true }));
+  await sleep(700);
+  ok(window.eval("filt.kw") === "李" && doc.getElementById("flt-kw").value === "李" && doc.activeElement.id === "flt-kw",
+    "选完字后按中文搜索，光标还留在搜索框里");
+  A.setFKw(""); await sleep(400);
+
   // ---- 我的账号：职位 + 打卡记录 + 消息通知入口 ----
   window.go("account"); await sleep(500);
   ok(!app().includes("角色"), "全站不再出现「角色」字样");
@@ -197,7 +211,27 @@ async function apiAs(phone, method, p, body) {
   await sleep(100);
   const lb = doc.getElementById("lightbox");
   ok(!!lb && !lb.innerHTML.includes("双指放大"), "大图查看器不再显示双指缩放的文字提示(聊天/订单图片都一样)");
+  // 保存照片：电脑/安卓照常下载；苹果手机下载的进「文件」不进相册，改走系统分享(有「存储图像」)；微信等提示长按保存
+  const clickSave = () => { const ev = new window.MouseEvent("click", { bubbles: true, cancelable: true });
+    doc.querySelector("#lightbox .lb-save").dispatchEvent(ev); return ev.defaultPrevented; };
+  ok(lb.querySelector(".lb-save").getAttribute("download") === "照片1.jpg" && !clickSave(), "电脑上点保存照常下载");
   A.closeLightbox(); await sleep(100);
+  const nav = window.navigator, realFetch = window.fetch, setUA = ua => Object.defineProperty(nav, "userAgent", { value: ua, configurable: true });
+  let shared = null;
+  nav.canShare = () => true; nav.share = d => { shared = d; return Promise.resolve(); };
+  window.fetch = u => String(u).startsWith("/uploads/") ? Promise.resolve({ ok: true, blob: async () => new window.Blob(["x"], { type: "image/jpeg" }) }) : realFetch(u);
+  setUA("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1");
+  window.eval(`A.lightboxFromEl({getAttribute:(n)=>({"data-gallery":'["/uploads/x.jpg"]',"data-i":"0"}[n])})`);
+  await sleep(100);
+  ok(clickSave() && shared && shared.files[0].type === "image/jpeg" && shared.files[0].name === "照片1.jpg",
+    "苹果手机点保存弹系统分享(里面有「存储图像」，直接存进相册)");
+  A.closeLightbox(); await sleep(100);
+  setUA("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 MicroMessenger/8.0.50");
+  window.eval(`A.lightboxFromEl({getAttribute:(n)=>({"data-gallery":'["/uploads/x.jpg"]',"data-i":"0"}[n])})`);
+  await sleep(100); shared = null;
+  ok(clickSave() && !shared && doc.getElementById("msg").textContent.includes("长按图片"), "微信里点保存提示长按图片保存");
+  A.closeLightbox(); await sleep(100);
+  delete nav.userAgent; delete nav.canShare; delete nav.share; window.fetch = realFetch;
 
   // 对方回复后，会话轮询能收到
   await apiAs("13811112222", "POST", "/chat/with/" + st().me.id, { text: "收到，我马上联系工厂" });
