@@ -26,13 +26,16 @@ router.post("/users", A.adminRequired, (req, res) => {
 router.patch("/users/:id", A.adminRequired, (req, res) => {
   const u = activeUser(req.params.id);
   if (!u) return res.status(404).json({ error: "员工不存在" });
-  const { name, phone, role } = req.body || {};
+  const { name, phone, role, scope } = req.body || {};
+  // 个人看订单范围：""/null 跟随职位
+  if (scope !== undefined && ![null, "", "own", "all"].includes(scope)) return res.status(400).json({ error: "看订单范围不对" });
   if (role !== undefined) {
     if (u.id === req.user.id) return res.status(400).json({ error: "不能修改自己的职位" });
     if (u.role === "admin") return res.status(400).json({ error: "不能修改管理员的职位" });
     if (!getSetting("roles", []).some(r => r.k === role)) return res.status(400).json({ error: "职位不存在" });
     db.prepare("UPDATE users SET role=? WHERE id=?").run(role, u.id);
   }
+  if (scope !== undefined) db.prepare("UPDATE users SET scope=? WHERE id=?").run(scope || null, u.id);
   if (name !== undefined && String(name).trim()) db.prepare("UPDATE users SET name=? WHERE id=?").run(String(name).trim(), u.id);
   if (phone !== undefined && String(phone).trim()) {
     const dup = db.prepare("SELECT id FROM users WHERE phone=? AND id<>? AND deleted=0").get(String(phone).trim(), u.id);

@@ -47,9 +47,9 @@ function fieldInput(f, val, prefix) {
   if (isMultiPick(f)) return multiPickHtml(f, val, id);
   const opts = optionsFor(f);
   if (opts) {
-    // 值不在下拉列表里(如导入的)也保留显示
-    const isFactory = f.type === "factory-prod";
-    const extra = (isFactory && val && !opts.some(([v]) => v === val)) ? [[val, val]] : [];
+    // 值不在下拉列表里(导入的、已离职的人等)也保留显示，免得一保存就被清空
+    const label = !isUserField(f) ? val : formerUserById(val) ? uname(val) + "（已离职）" : uname(val) || val;
+    const extra = val && !opts.some(([v]) => v === val) ? [[val, label]] : [];
     return `<select class="in" id="${id}"><option value="">请选择</option>${[...extra, ...opts].map(([v, t]) =>
       `<option value="${esc(v)}" ${v === val ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
   }

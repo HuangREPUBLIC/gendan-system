@@ -6,7 +6,7 @@ const A = {};
 
 let state = {
   token: localStorage.getItem("daka_token") || null,
-  me: null, users: [], fields: { order: [], production: [] },
+  me: null, users: [], formerUsers: [], fields: { order: [], production: [] },
   factories: { emb: [], prod: [], proc: [] }, orders: [], roles: [], seasons: [],
   chat: { contacts: [], activeId: null, contact: null, messages: [], draft: "", att: null },
   unread: { total: 0, byUser: {} },

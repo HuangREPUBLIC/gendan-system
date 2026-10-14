@@ -286,6 +286,12 @@ async function call(method, path, token, body) {
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { desc: "管理员改的" } })).status === 200, "管理员仍能修改已锁定订单的其它内容");
   ok((await call("PATCH", `/orders/${lockOrder.j.id}`, aT, { values: { shipDate: "2026-09-10" } })).status === 200, "管理员仍能修改已锁定的发货日期本身");
 
+  // 同时加几个字段，key 不能撞(撞了改名/填值会落到别的字段上)
+  await Promise.all([1, 2, 3, 4, 5, 6].map(i => call("POST", "/fields", aT, { section: "order", label: "撞键测试" + i, type: "text" })));
+  const clashKeys = (await call("GET", "/bootstrap", aT)).j.fields.order.filter(f => f.label.startsWith("撞键测试")).map(f => f.k);
+  ok(clashKeys.length === 6 && new Set(clashKeys).size === 6, "同时加多个字段，key 不会重复");
+  for (const k of new Set(clashKeys)) await call("DELETE", `/fields/order/${k}`, aT);
+
   // ---- 字段放在谁后面就进谁那张卡片；发货那栏的新字段跟发货日期一样填后锁定 ----
   const pf = (await call("GET", "/bootstrap", aT)).j.fields;
   ok(pf.order.find(f => f.k === "deadline").quick && !pf.order.find(f => f.k === "deadline").lock, "订单交期是单独一栏，不锁定");
@@ -400,6 +406,45 @@ async function call(method, path, token, body) {
   ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "packing", text: "脏数据" })).status === 403,
     "非法的权限值被忽略，不会意外放开权限");
   await call("PATCH", "/roles/sales/perms", aT, { perms: null });
+
+  // ---- 看订单范围可以按人单独设置，优先于职位；能做什么仍看职位的勾选 ----
+  const sc = (await call("POST", "/users", aT, { name: "范围测试", phone: "13900005555", role: "follower" })).j;
+  const scT = (await call("POST", "/login", null, { phone: "13900005555", password: "123456" })).j.token;
+  const so = (await call("POST", "/orders", aT, { season: "SS2027", values: { styleNo: "SCOPE-1" } })).j;  // 跟他无关的单
+  ok((await call("GET", `/orders/${so.id}`, scT)).status === 403, "跟随职位(下厂员只看自己)：看不到别人的单");
+  ok((await call("PATCH", `/users/${sc.id}`, sT, { scope: "all" })).status === 403, "非管理员不能改看订单范围");
+  ok((await call("PATCH", `/users/${sc.id}`, aT, { scope: "everything" })).status === 400, "看订单范围只认跟随职位/只看自己/看全部");
+  const setAll = await call("PATCH", `/users/${sc.id}`, aT, { scope: "all" });
+  ok(setAll.status === 200 && setAll.j.scope === "all", "管理员把这个人单独设成看全部");
+  const scBoot = (await call("GET", "/bootstrap", scT)).j;
+  ok(scBoot.me.scope === "all" && scBoot.orders.length === (await call("GET", "/bootstrap", aT)).j.orders.length,
+    "单独设成看全部后能看到全部订单(他的职位仍是只看自己)");
+  ok((await call("POST", `/orders/${so.id}/logs`, scT, { key: "packing", text: "看全部后打卡" })).status === 200,
+    "看全部后，职位勾了的事(下厂员在生产明细打卡)在别人的单上也能做");
+  ok((await call("PATCH", `/orders/${so.id}`, scT, { values: { styleName: "想改订单明细" } })).status === 403,
+    "职位没勾的事(下厂员改订单明细)看全部后照样不行");
+  await call("PATCH", "/roles/follower/perms", aT, { perms: { scope: "all" } });
+  await call("PATCH", `/users/${sc.id}`, aT, { scope: "own" });
+  ok((await call("GET", `/orders/${so.id}`, scT)).status === 403, "职位是看全部，但这个人单独设成只看自己：看不到别人的单");
+  ok((await call("GET", "/bootstrap", scT)).j.orders.length === 0, "订单列表里也只剩自己的单");
+  const backToRole = await call("PATCH", `/users/${sc.id}`, aT, { scope: "" });
+  ok(backToRole.status === 200 && backToRole.j.scope === "", "改回跟随职位");
+  ok((await call("GET", `/orders/${so.id}`, scT)).status === 200, "跟随职位后按职位(看全部)走");
+  await call("PATCH", "/roles/follower/perms", aT, { perms: null });
+  ok((await call("GET", `/orders/${so.id}`, scT)).status === 403, "职位恢复默认后又只看自己");
+  // 主管职位的人单独设成只看自己：自己建的/当业务员、下厂员的单能看，别的单看不到也不再收到通知
+  const supK = (await call("POST", "/roles", aT, { label: "范围测试主管", template: "supervisor" })).j.find(r => r.label === "范围测试主管").k;
+  const sup = (await call("POST", "/users", aT, { name: "范围测试主管", phone: "13900005556", role: supK })).j;
+  const supT = (await call("POST", "/login", null, { phone: "13900005556", password: "123456" })).j.token;
+  ok((await call("GET", `/orders/${so.id}`, supT)).status === 200, "主管默认看全部");
+  await call("PATCH", `/users/${sup.id}`, aT, { scope: "own" });
+  const supOwn = (await call("POST", "/orders", supT, { season: "SS2027", values: { styleNo: "SCOPE-SUP" } })).j;
+  ok((await call("GET", `/orders/${supOwn.id}`, supT)).status === 200, "主管单独设成只看自己：自己建的单照样能看");
+  ok((await call("GET", `/orders/${so.id}`, supT)).status === 403, "主管单独设成只看自己：别人的单看不到");
+  await call("PATCH", `/orders/${so.id}`, aT, { values: { styleName: "主管不该收到这条" } });
+  ok(!(await call("GET", "/notifications", supT)).j.some(n => n.orderId === so.id), "也不再收到看不到的单的通知");
+  await call("DELETE", `/orders/${supOwn.id}`, aT); await call("DELETE", `/users/${sup.id}`, aT); await call("DELETE", `/roles/${supK}`, aT);
+  await call("DELETE", `/orders/${so.id}`, aT); await call("DELETE", `/users/${sc.id}`, aT);
 
   // ---- 系统推送订阅（App 没打开时也能收到手机通知） ----
   ok((await call("GET", "/push/key")).status === 401, "未登录拿不到推送公钥");

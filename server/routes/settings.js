@@ -34,7 +34,10 @@ router.post("/fields", A.adminRequired, (req, res) => {
   if (!lb) return res.status(400).json({ error: "请填写字段名称" });
   const fields = getFields();
   if (fields[section].some(x => x.label === lb)) return res.status(400).json({ error: `「${lb}」字段已存在，不能重复添加` });
-  const f = { k: "f" + Date.now(), label: lb, type };
+  // 同一毫秒加的字段 key 会撞，往后顺延
+  let n = Date.now();
+  while ([...fields.order, ...fields.production].some(x => x.k === "f" + n)) n++;
+  const f = { k: "f" + n, label: lb, type };
   if (hasOptions(type)) {
     f.options = cleanOptions(options);
     if (!f.options.length) return res.status(400).json({ error: "请填写下拉选项" });
@@ -58,8 +61,9 @@ function convertFieldValues(key, fromType, toType) {
   const fromUser = USER_FIELD_TYPES.includes(fromType) && !USER_FIELD_TYPES.includes(toType);
   const toMulti = MULTI_FIELD_TYPES.includes(toType), fromMulti = MULTI_FIELD_TYPES.includes(fromType);
   if (!toUser && !fromUser && toMulti === fromMulti) return;
-  const users = activeUsers();
-  const idByName = new Map(users.map(u => [u.name, u.id])), nameById = new Map(users.map(u => [u.id, u.name]));
+  // 姓名换 id 只认在职的；id 换姓名连离职的也认，免得把 id 当文字存下来
+  const idByName = new Map(activeUsers().map(u => [u.name, u.id]));
+  const nameById = new Map(db.prepare("SELECT id, name FROM users").all().map(u => [u.id, u.name]));
   const update = db.prepare("UPDATE orders SET data=? WHERE id=?");
   db.prepare("SELECT id, data FROM orders").all().forEach(r => {
     const d = JSON.parse(r.data), v = (d.values || {})[key];

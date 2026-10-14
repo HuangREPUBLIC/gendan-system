@@ -299,14 +299,18 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
 @media (max-width:640px){
   .tbl.stack{min-width:0}
   .tbl.stack tr:first-child{display:none}
-  .tbl.stack tr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name role" "phone role" "acts acts";
+  .tbl.stack tr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name role" "phone role" "scope scope" "acts acts";
     column-gap:12px;padding:12px 16px;border-bottom:.5px solid var(--line)}
   .tbl.stack tr:last-child{border-bottom:0}
   .tbl.stack td{padding:0;border:0;background:none}
   .tbl.stack td:nth-child(1){grid-area:name;font-weight:600}
   .tbl.stack td:nth-child(2){grid-area:phone;color:var(--ink-2);font-size:var(--fs-sub)}
   .tbl.stack td:nth-child(3){grid-area:role;align-self:center}
-  .tbl.stack td:nth-child(4){grid-area:acts;display:flex;flex-wrap:wrap;gap:8px;padding-top:10px}
+  /* 看订单范围单独一行；手机上表头隐藏了，用 ::before 补上名称 */
+  .tbl.stack td:nth-child(4){grid-area:scope;display:flex;align-items:center;gap:8px;padding-top:10px}
+  .tbl.stack td:nth-child(4)::before{content:"看订单范围";color:var(--ink-2);font-size:var(--fs-sub);white-space:nowrap}
+  .tbl.stack td:nth-child(4) select{min-width:0}
+  .tbl.stack td:nth-child(5){grid-area:acts;display:flex;flex-wrap:wrap;gap:8px;padding-top:10px}
   .tbl.stack td[colspan]{grid-column:1 / -1}
 }
 

@@ -120,6 +120,11 @@ function ensureDefaults() {
     db.exec("ALTER TABLE notifications ADD COLUMN merged INTEGER NOT NULL DEFAULT 1");
     console.log("[db] 已为 notifications 表补上 actor_id/merged 列");
   }
+  // 个人看订单范围：NULL 跟随职位，own/all 单独设置
+  if (!columnExists("users", "scope")) {
+    db.exec("ALTER TABLE users ADD COLUMN scope TEXT");
+    console.log("[db] 已为 users 表补上 scope 列");
+  }
   const roles = getSetting("roles", null);
   if (!roles || !roles.length) {
     setSetting("roles", DEFAULT_ROLES);

@@ -10,12 +10,20 @@ const PERM_LABELS = [
   ["inspect",     "验货问题与整改",          ""]
 ];
 const TEMPLATE_LABEL = { sales: "业务员", follower: "下厂员", supervisor: "主管" };
+const SCOPE_LABEL = { own: "只看自己相关的订单", all: "看全部订单" };
 
 function adminPeopleHtml() {
   const roleCell = u => u.role === "admin"
     ? `<span class="tag role">管理员</span>`
     : `<select class="in tbl-select" onchange="A.changeRole('${u.id}',this.value)">
         ${state.roles.map(r => `<option value="${esc(r.k)}" ${u.role === r.k ? "selected" : ""}>${esc(r.label)}</option>`).join("")}</select>`;
+  // 个人看订单范围：默认跟随职位(括号里是职位现在的范围)
+  const scopeCell = u => {
+    const roleScope = permsOfRole(state.roles.find(r => r.k === u.role) || {}).scope;
+    const opt = (v, t) => `<option value="${v}" ${(u.scope || "") === v ? "selected" : ""}>${t}</option>`;
+    return `<select class="in tbl-select" aria-label="${esc(u.name)}的看订单范围" onchange="A.setUserScope('${u.id}',this.value)">
+      ${opt("", `跟随职位（${roleScope === "all" ? "看全部" : "只看自己"}）`)}${opt("own", SCOPE_LABEL.own)}${opt("all", SCOPE_LABEL.all)}</select>`;
+  };
   const kw = adminUserFilt.kw.trim().toLowerCase();
   const allStaff = state.users.filter(u => u.role !== "admin");
   const matched = kw ? allStaff.filter(u => u.name.toLowerCase().includes(kw)) : allStaff;
@@ -29,14 +37,14 @@ function adminPeopleHtml() {
     <div class="card"><div class="card-pad" style="padding-bottom:0">
       <input class="in" id="admin-user-kw" placeholder="搜索姓名" value="${esc(adminUserFilt.kw)}" oninput="A.setAdminUserKw(this.value)">
     </div><div class="tbl-wrap"><table class="tbl stack">
-      <tr><th>姓名</th><th>手机号</th><th>职位</th><th>操作</th></tr>
+      <tr><th>姓名</th><th>手机号</th><th>职位</th><th>看订单范围</th><th>操作</th></tr>
       ${pageStaff.map(u => `<tr>
         <td style="white-space:nowrap">${esc(u.name)}${u.id === me().id ? ` <span class="tag">我</span>` : ""}</td>
-        <td class="num">${esc(u.phone)}</td><td>${roleCell(u)}</td>
+        <td class="num">${esc(u.phone)}</td><td>${roleCell(u)}</td><td>${scopeCell(u)}</td>
         <td style="white-space:nowrap"><button class="btn mini ghost" onclick="A.viewStaffLogs('${u.id}')">查看打卡</button>${
           u.role === "admin" ? "" : ` <button class="btn mini ghost" onclick="A.resetUserPw('${u.id}')">重置密码</button>
           <button class="btn mini danger ghost" onclick="A.deleteUser('${u.id}')">删除</button>`}</td></tr>`).join("")
-        || `<tr><td colspan="4"><div class="empty">没有符合条件的员工</div></td></tr>`}
+        || `<tr><td colspan="5"><div class="empty">没有符合条件的员工</div></td></tr>`}
     </table></div>
     ${totalPages > 1 ? `<div class="card-pad" style="display:flex;align-items:center;justify-content:center;gap:14px">
       <button class="btn mini ghost" ${adminUserFilt.page <= 1 ? "disabled" : ""} onclick="A.setAdminUserPage(${adminUserFilt.page - 1})">‹ 上一页</button>
@@ -73,7 +81,7 @@ function adminPermsHtml() {
   </section>
 
   <section class="group a-perms">
-    <div class="group-title">权限配置</div>
+    <div class="group-title">权限配置 · 看订单范围也能在「人员」里按人单独设置，单独设置的优先</div>
     ${state.roles.map(r => {
       const p = permsOfRole(r);
       return `<div class="card" style="margin-top:12px">
@@ -218,6 +226,10 @@ Object.assign(A, {
   async changeRole(id, role) {
     const u = userById(id);
     await run(() => api("PATCH", "/users/" + id, { role }), `已把 ${u ? u.name : ""} 的职位改为${labelForRoleKey(role)}`);
+  },
+  async setUserScope(id, scope) {
+    const u = userById(id);
+    await run(() => api("PATCH", "/users/" + id, { scope }), `已把 ${u ? u.name : ""} 的看订单范围改为${SCOPE_LABEL[scope] || "跟随职位"}`);
   },
   deleteUser(id) {
     const u = userById(id); if (!u) return;

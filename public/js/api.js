@@ -14,7 +14,7 @@ async function api(method, path, body) {
 }
 async function refresh() {
   const b = await api("GET", "/bootstrap");
-  state.me = b.me; state.users = b.users; state.fields = b.fields;
+  state.me = b.me; state.users = b.users; state.formerUsers = b.formerUsers || []; state.fields = b.fields;
   state.factories = b.factories; state.orders = b.orders; state.roles = b.roles || [];
   state.seasons = b.seasons || [];
   saveStateCache();
@@ -24,7 +24,7 @@ const STATE_CACHE_KEY = "daka_cache_v1";
 function saveStateCache() {
   try {
     localStorage.setItem(STATE_CACHE_KEY, JSON.stringify({
-      token: state.token, me: state.me, users: state.users, fields: state.fields,
+      token: state.token, me: state.me, users: state.users, formerUsers: state.formerUsers, fields: state.fields,
       factories: state.factories, orders: state.orders, roles: state.roles, seasons: state.seasons
     }));
   } catch (e) { /* 存储满了/不可用就算了，不影响功能 */ }
@@ -33,7 +33,7 @@ function loadStateCache() {
   try {
     const c = JSON.parse(localStorage.getItem(STATE_CACHE_KEY) || "null");
     if (!c || c.token !== state.token) return;
-    state.me = c.me; state.users = c.users; state.fields = c.fields;
+    state.me = c.me; state.users = c.users; state.formerUsers = c.formerUsers || []; state.fields = c.fields;
     state.factories = c.factories; state.orders = c.orders; state.roles = c.roles; state.seasons = c.seasons;
   } catch (e) { /* 缓存损坏就忽略，走正常的网络加载 */ }
 }

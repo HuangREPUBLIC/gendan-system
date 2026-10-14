@@ -20,6 +20,8 @@ router.get("/bootstrap", (req, res) => {
   res.json({
     me: A.userPublic(req.user),
     users: activeUsers().map(A.userPublic),
+    // 离职员工只给姓名：老订单上存的是他的 id，要能显示原名
+    formerUsers: db.prepare("SELECT id, name FROM users WHERE deleted = 1").all(),
     fields: getFields(),
     factories: getFactories(),
     roles: getSetting("roles", []),

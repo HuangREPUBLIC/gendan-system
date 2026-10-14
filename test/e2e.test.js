@@ -85,6 +85,32 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await A.modalOk(); await sleep(500);
   ok(!st().users.some(u => u.id === tmp.id), "确认后员工已删除");
 
+  // 离职员工：老订单显示原名，编辑保存也不会把他从订单上清掉
+  const quit = await window.api("POST", "/users", { name: "离职小张", phone: "13900006666", role: "sales" });
+  const qo = await window.api("POST", "/orders", { season: "SS2027", values: { styleNo: "E2E-QUIT", sales: quit.id } });
+  await window.api("DELETE", "/users/" + quit.id); await window.refresh();
+  window.go("orders"); await sleep(200);
+  ok(app().includes("业务员 离职小张"), "订单列表里离职员工仍显示原名");
+  window.go("detail", qo.id); await sleep(200);
+  ok(app().includes("离职小张") && !app().includes(quit.id), "详情页显示离职员工原名，不是一串乱码");
+  A.toggleBasic(); await sleep(150);
+  const salesSel = doc.getElementById("nf-sales");
+  ok(salesSel.value === quit.id && salesSel.selectedOptions[0].textContent === "离职小张（已离职）", "编辑时业务员下拉仍选着他，并标明已离职");
+  await A.saveBasic(qo.id); await sleep(400);
+  ok(st().orders.find(o => o.id === qo.id).values.sales === quit.id, "保存修改不会把离职员工从订单上清掉");
+  await window.api("DELETE", "/orders/" + qo.id);
+
+  // 看订单范围可以按人单独设置
+  window.go("admin"); A.setAdminTab("people"); await sleep(200);
+  const chenU = st().users.find(u => u.name === "陈晓芳");
+  const scopeSels = (app().match(/A\.setUserScope\(/g) || []).length;
+  ok(app().includes(`A.setUserScope('${chenU.id}'`) && scopeSels === (app().match(/A\.changeRole\(/g) || []).length, "人员列表里每个员工都有看订单范围下拉");
+  ok(app().includes("跟随职位（只看自己）"), "默认是跟随职位，并写明职位当前的范围");
+  await A.setUserScope(chenU.id, "all"); await sleep(400);
+  ok(st().users.find(u => u.id === chenU.id).scope === "all", "改了立即保存");
+  await A.setUserScope(chenU.id, ""); await sleep(400);
+  ok(st().users.find(u => u.id === chenU.id).scope === "", "改回跟随职位");
+
   // 新建订单（季节下拉）
   window.go("new"); await sleep(200);
   const seasonSel = doc.getElementById("nf-season");
@@ -127,6 +153,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 
   // 权限：下厂员视角
+  const adminToken = st().token;
   A.forceLogout(); await sleep(150);
   doc.getElementById("lg-phone").value = "13877778888"; // 刘敏
   doc.getElementById("lg-pass").value = "123456";
@@ -135,6 +162,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   ok(app().includes("go('new')"), "任意登录用户都能看到新建订单入口");
   window.go("detail", o1.id); await sleep(250); // o1 归王建国，跟刘敏(o2 下厂员)无关
   ok(!app().includes("txt-cutting"), "谁负责的内容谁有权限：跟本单无关的下厂员看不到打卡框");
+  // 管理员单独给她设成看全部：按钮跟着个人范围走(服务端同规则)
+  const setLiuScope = scope => fetch(BASEU + "/api/users/" + st().me.id, { method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + adminToken }, body: JSON.stringify({ scope }) });
+  await setLiuScope("all"); await window.refresh(); window.render(); await sleep(150);
+  ok(app().includes("txt-cutting"), "单独设成看全部后，别人的单上也出现职位允许的打卡框");
+  await setLiuScope(""); await window.refresh(); window.render(); await sleep(150);
+  ok(!app().includes("txt-cutting"), "改回跟随职位后打卡框又没了");
 
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);

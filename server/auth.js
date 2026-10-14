@@ -42,7 +42,7 @@ function roleLabel(roleKey) {
 function userPublic(u) {
   if (!u) return null;
   return { id: u.id, name: u.name, phone: u.phone, role: u.role,
-    roleLabel: roleLabel(u.role), template: roleTemplate(u.role), deleted: !!u.deleted };
+    roleLabel: roleLabel(u.role), template: roleTemplate(u.role), deleted: !!u.deleted, scope: u.scope || "" };
 }
 const userById = (id) => db.prepare("SELECT * FROM users WHERE id = ?").get(id);
 
@@ -66,7 +66,8 @@ function adminRequired(req, res, next) {
 }
 
 /* 权限：template 决定"自己的单"怎么算(业务员看 sales，下厂员看 follower)，
- * perms 决定能做什么(管理员在「管理 → 权限」里逐项开关，未配置时按模板默认) */
+ * perms 决定能做什么(管理员在「管理 → 权限」里逐项开关，未配置时按模板默认)；
+ * 看订单范围(scope)还能在「管理 → 人员」里按人单独设置，优先于职位 */
 const isAdmin = (u) => u && u.role === "admin";
 const isSupervisor = (u) => u && templateOf(u) === "supervisor";
 
@@ -79,7 +80,8 @@ const PERM_KEYS = ["editOrder", "editProd", "logOrder", "logProd", "createOrder"
 function permsOf(u) {
   if (isAdmin(u)) return TEMPLATE_PERMS.supervisor;   // 管理员永远全权，不可配置
   const base = TEMPLATE_PERMS[templateOf(u)] || TEMPLATE_PERMS.follower;
-  const saved = (findRole(u && u.role) || {}).perms;
+  const rolePerms = (findRole(u && u.role) || {}).perms;
+  const saved = u && (u.scope === "own" || u.scope === "all") ? Object.assign({}, rolePerms, { scope: u.scope }) : rolePerms;
   if (!saved) return base;
   // 只认已知键，脏数据不会放大权限
   const out = Object.assign({}, base);
@@ -95,7 +97,8 @@ function isRelated(u, order) {
   const t = templateOf(u);
   if (t === "sales") return v.sales === u.id || order.created_by === u.id;
   if (t === "follower") return v.follower === u.id;
-  return false;
+  // 主管设成只看自己时：自己建的、当业务员或下厂员的单
+  return v.sales === u.id || v.follower === u.id || order.created_by === u.id;
 }
 const canViewOrder = isRelated;
 // section 为 "order"/"production"；不传表示任一板块有权即可

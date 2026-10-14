@@ -2,7 +2,9 @@
 // 当前用户与权限判断（只控制显示，规则同服务端 auth.js）
 
 const userById = id => state.users.find(u => u.id === id);
-const uname = id => (userById(id) || {}).name || "";
+// 离职员工不在 users 里，但老订单上还存着他的 id，姓名照样能查到
+const formerUserById = id => state.formerUsers.find(u => u.id === id);
+const uname = id => (userById(id) || formerUserById(id) || {}).name || "";
 const me = () => state.me;
 const isAdmin = () => me() && me().template === "admin";
 const canCreateOrder = () => !!me();
@@ -27,7 +29,9 @@ function mergePerms(template, saved) {
 function myPerms() {
   const u = me(); if (!u) return null;
   if (isAdmin()) return TEMPLATE_PERMS.supervisor;
-  return mergePerms(u.template, (state.roles.find(r => r.k === u.role) || {}).perms);
+  // 个人单独设置的看订单范围优先于职位(同服务端 permsOf)
+  const rolePerms = (state.roles.find(r => r.k === u.role) || {}).perms;
+  return mergePerms(u.template, u.scope === "own" || u.scope === "all" ? Object.assign({}, rolePerms, { scope: u.scope }) : rolePerms);
 }
 const permsOfRole = r => mergePerms(r.template, r.perms);
 function isRelated(o) {
@@ -35,7 +39,7 @@ function isRelated(o) {
   if (myPerms().scope === "all") return true;
   if (u.template === "sales") return o.values.sales === u.id || o.createdBy === u.id;
   if (u.template === "follower") return o.values.follower === u.id;
-  return false;
+  return o.values.sales === u.id || o.values.follower === u.id || o.createdBy === u.id;
 }
 function sectionPerm(o, section, orderKey, prodKey) {
   if (!isRelated(o)) return false;
