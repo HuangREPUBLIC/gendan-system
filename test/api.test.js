@@ -164,10 +164,15 @@ async function call(method, path, token, body) {
   ok(alb.status === 200 && Array.isArray(alb.j.values.img) && alb.j.values.img.length === 3, "款式图可存多张");
 
   // export xlsx (admin only)，导出全部内容(订单基本信息/生产进度/验货问题/跟单小结)，可按季节筛选
-  const exp = await fetch(BASE + "/export", { headers: { Authorization: "Bearer " + aT } });
+  // 跟页面同一条路：先取一次性下载链接，再下载
+  const exportFile = async (token, season) => {
+    const t = await call("POST", "/export/ticket", token, { season });
+    return t.status === 200 ? fetch(BASE.replace(/\/api$/, "") + t.j.url) : { status: t.status };
+  };
+  const exp = await exportFile(aT);
   const buf = Buffer.from(await exp.arrayBuffer());
   ok(exp.status === 200 && buf.slice(0, 2).toString() === "PK" && buf.length > 500, "导出真实 .xlsx (PK 头)");
-  ok((await fetch(BASE + "/export", { headers: { Authorization: "Bearer " + sT } })).status === 403, "非管理员不能导出");
+  ok((await exportFile(sT)).status === 403, "非管理员不能导出");
   const XLSX = require("xlsx");
   const wb = XLSX.read(buf, { type: "buffer" });
   ok(["订单基本信息", "生产进度", "验货问题", "跟单小结"].every(n => wb.SheetNames.includes(n)), "导出含四个分表：基本信息/生产进度/验货问题/跟单小结");
@@ -177,11 +182,11 @@ async function call(method, path, token, body) {
   const inspSheet = XLSX.utils.sheet_to_json(wb.Sheets["验货问题"]);
   ok(inspSheet.some(r => r["发现问题"] === "首件肩缝有轻微起皱"), "验货问题表含发现问题内容");
   // 按季节筛选导出
-  const expFiltered = await fetch(BASE + "/export?season=" + encodeURIComponent(o1.season), { headers: { Authorization: "Bearer " + aT } });
+  const expFiltered = await exportFile(aT, o1.season);
   const wbF = XLSX.read(Buffer.from(await expFiltered.arrayBuffer()), { type: "buffer" });
   const baseRows = XLSX.utils.sheet_to_json(wbF.Sheets["订单基本信息"]);
   ok(baseRows.length > 0 && baseRows.every(r => r["季节"] === o1.season), "按季节筛选导出后只含该季节的订单");
-  const noMatch = await fetch(BASE + "/export?season=不存在的季节XYZ", { headers: { Authorization: "Bearer " + aT } });
+  const noMatch = await exportFile(aT, "不存在的季节XYZ");
   const wbEmpty = XLSX.read(Buffer.from(await noMatch.arrayBuffer()), { type: "buffer" });
   ok(XLSX.utils.sheet_to_json(wbEmpty.Sheets["订单基本信息"]).length === 0, "筛选不存在的季节时导出为空");
 
@@ -199,7 +204,7 @@ async function call(method, path, token, body) {
     { key: "mainLog", text: "嵌图测试打卡", process: "车缝", workers: "5", estDone: "2026-08-01", photos: [upJ.url] });
   ok(mlog.status === 200, "本厂打卡带照片(供嵌图测试用)");
 
-  const exp2 = await fetch(BASE + "/export", { headers: { Authorization: "Bearer " + aT } });
+  const exp2 = await exportFile(aT);
   const buf2 = Buffer.from(await exp2.arrayBuffer());
   const AdmZip = require("adm-zip");
   const zip2 = new AdmZip(buf2);

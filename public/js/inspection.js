@@ -1,26 +1,26 @@
 "use strict";
 // 验货：发现问题、整改情况、补充说明
 
-function inspItemHtml(o, g, it, canInsp, canFix) {
+function inspItemHtml(o, g, it, canInsp) {
   // 没权限填整改时写明该谁填
   const fixHint = o.values.follower ? `由 ${esc(uname(o.values.follower))} 或管理员填写` : "尚未指定下厂员，需管理员先在「生产明细」指定负责人";
   return `<div class="insp-item">
     <div><span class="lbl p">发现问题</span>${esc(it.problem)}
       ${canInsp ? `<button type="button" class="act-btn" style="margin-left:6px" onclick="A.editInspProblem('${o.id}','${g.id}','${it.id}')">改</button>` : ""}</div>
     <div style="margin-top:4px"><span class="lbl f2">整改情况</span>${it.fix ? esc(it.fix)
-        : `<span style="color:var(--ink-2)">待整改${canFix ? "" : `（${fixHint}）`}</span>`}
-      ${canFix ? `<button type="button" class="act-btn" style="margin-left:6px" onclick="A.editInspFix('${o.id}','${g.id}','${it.id}')">${it.fix ? "改" : "填写"}</button>` : ""}</div>
+        : `<span style="color:var(--ink-2)">待整改${canInsp ? "" : `（${fixHint}）`}</span>`}
+      ${canInsp ? `<button type="button" class="act-btn" style="margin-left:6px" onclick="A.editInspFix('${o.id}','${g.id}','${it.id}')">${it.fix ? "改" : "填写"}</button>` : ""}</div>
     ${(it.notes || []).length ? it.notes.map(n => `<div style="margin-top:4px;font-size:12.5px;color:var(--ink-2)">补充说明（${esc(n.byName)} · ${fmtT(n.t)}）：${esc(n.text)}</div>`).join("") : ""}
-    ${(canInsp || canFix) ? `<button type="button" class="act-btn ghost" style="margin-top:6px" onclick="A.addInspNote('${o.id}','${g.id}','${it.id}')">＋ 补充说明</button>` : ""}
+    ${canInsp ? `<button type="button" class="act-btn ghost" style="margin-top:6px" onclick="A.addInspNote('${o.id}','${g.id}','${it.id}')">＋ 补充说明</button>` : ""}
   </div>`;
 }
-function inspBatchHtml(o, g, canInsp, canFix) {
+function inspBatchHtml(o, g, canInsp) {
   return `<div class="insp-day">
     <div class="lf-head"><span style="font-weight:400;color:var(--ink-2);font-size:12.5px">${esc(g.byName)} · <span class="num">${fmtT(g.t)}</span></span>
       ${canTouchEntry(o, g) ? `<span class="act-row right">
         <button type="button" class="act-btn" onclick="A.editInspPhotos('${o.id}','${g.id}')">改照片</button>
         <button type="button" class="act-btn danger" onclick="A.delInsp('${o.id}','${g.id}')">删除</button></span>` : ""}</div>
-    ${g.items.map(it => inspItemHtml(o, g, it, canInsp, canFix)).join("")}${photoGallery(g.photos)}</div>`;
+    ${g.items.map(it => inspItemHtml(o, g, it, canInsp)).join("")}${photoGallery(g.photos)}</div>`;
 }
 
 function inspItemOf(oid, gid, itemId) {

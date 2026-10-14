@@ -126,7 +126,6 @@ function sectionPerm(u, order, section, orderKey, prodKey) {
   return !!(p[orderKey] || p[prodKey]);
 }
 const canEditSection = (u, order, section) => sectionPerm(u, order, section, "editOrder", "editProd");
-const canEditBasic = (u, order) => canEditSection(u, order);
 // 打卡与改字段是独立开关
 const canAddLog = (u, order, section) => sectionPerm(u, order, section, "logOrder", "logProd");
 const canCreateOrder = (u) => !!u && !!permsOf(u).createOrder;
@@ -137,14 +136,12 @@ function canTouchEntry(u, order, entry, section) {
   if (entry && entry.by === u.id && PERM_KEYS.some(k => p[k])) return true;
   return canEditSection(u, order, section);
 }
-// 验货「发现问题」「整改情况」共用一个开关
-const canWriteInspProblem = (u, order) => isRelated(u, order) && !!permsOf(u).inspect;
-const canWriteInspFix = canWriteInspProblem;
+// 验货「发现问题」「整改情况」「补充说明」共用一个开关
+const canInspect = (u, order) => isRelated(u, order) && !!permsOf(u).inspect;
 
 module.exports = {
   hashPassword, verifyPassword, signToken, userPublic,
   authRequired, adminRequired, isAdmin, isSupervisor,
-  canEditBasic, canEditSection, canAddLog, canTouchEntry, canViewOrder,
-  roleTemplate, canWriteInspProblem, canWriteInspFix,
-  canCreateOrder, PERM_KEYS
+  canEditSection, canAddLog, canTouchEntry, canViewOrder,
+  roleTemplate, canInspect, canCreateOrder, PERM_KEYS
 };

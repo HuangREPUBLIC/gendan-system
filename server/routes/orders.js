@@ -201,7 +201,7 @@ router.post("/orders/import", (req, res) => {
 
 router.patch("/orders/:id", withOrder, (req, res) => {
   const o = req.order;
-  if (!A.canEditBasic(req.user, o)) return res.status(403).json({ error: "无权修改此订单的基本信息" });
+  if (!A.canEditSection(req.user, o)) return res.status(403).json({ error: "无权修改此订单的基本信息" });
   const { season, values } = req.body || {};
   const before = { season: o.season, values: Object.assign({}, o.data.values) };
   // 季节算「一、订单明细」；其余字段按所属板块分别校验
@@ -217,7 +217,7 @@ router.patch("/orders/:id", withOrder, (req, res) => {
         if (!sameValue(o.data.values[key], "") && !A.isAdmin(req.user) && !A.isSupervisor(req.user)) {
           return res.status(403).json({ error: `「${f.label}」一经填写，只有管理员或主管能再修改` });
         }
-        if (!A.canEditBasic(req.user, o)) {
+        if (!A.canEditSection(req.user, o)) {
           return res.status(403).json({ error: `无权填写「${f.label}」` });
         }
         continue;
@@ -351,7 +351,7 @@ router.delete("/orders/:id/subs/:subId", A.adminRequired, withOrder, (req, res) 
  * 一次验货可记多条问题，下厂员逐条填整改情况 */
 router.post("/orders/:id/inspections", withOrder, (req, res) => {
   const o = req.order;
-  if (!A.canWriteInspProblem(req.user, o)) return res.status(403).json({ error: "无权在此订单记录验货发现的问题" });
+  if (!A.canInspect(req.user, o)) return res.status(403).json({ error: "无权在此订单记录验货发现的问题" });
   const problems = ((req.body || {}).problems || []).map(x => String(x || "").trim()).filter(Boolean);
   const inspPhotos = cleanPhotos((req.body || {}).photos);
   if (!problems.length && !inspPhotos.length) return res.status(400).json({ error: "请至少填写一条发现的问题或添加照片" });
@@ -375,14 +375,14 @@ router.patch("/orders/:id/inspections/:instId/items/:itemId", withOrder, (req, r
   let touched = false;
   const whats = [];
   if (body.problem !== undefined) {
-    if (!A.canWriteInspProblem(req.user, o)) return res.status(403).json({ error: "无权修改发现的问题" });
+    if (!A.canInspect(req.user, o)) return res.status(403).json({ error: "无权修改发现的问题" });
     const v = String(body.problem).trim();
     if (!v) return res.status(400).json({ error: "发现的问题不能为空" });
     item.problem = v; item.problemBy = req.user.id; item.problemByName = req.user.name; item.problemAt = Date.now();
     touched = true; whats.push("修改了验货问题");
   }
   if (body.fix !== undefined) {
-    if (!A.canWriteInspFix(req.user, o)) return res.status(403).json({ error: "只有本单负责下厂员或管理员可以填写整改情况" });
+    if (!A.canInspect(req.user, o)) return res.status(403).json({ error: "只有本单负责下厂员或管理员可以填写整改情况" });
     item.fix = String(body.fix).trim(); item.fixBy = req.user.id; item.fixByName = req.user.name; item.fixAt = Date.now();
     touched = true; whats.push("填写了验货整改情况");
   }
@@ -397,7 +397,7 @@ router.post("/orders/:id/inspections/:instId/items/:itemId/notes", withOrder, (r
   const o = req.order;
   const item = inspItemOf(o, req.params.instId, req.params.itemId);
   if (!item) return res.status(404).json({ error: "记录不存在" });
-  if (!A.canWriteInspProblem(req.user, o) && !A.canWriteInspFix(req.user, o)) return res.status(403).json({ error: "无权添加补充说明" });
+  if (!A.canInspect(req.user, o)) return res.status(403).json({ error: "无权添加补充说明" });
   const text = String((req.body || {}).text || "").trim();
   if (!text) return res.status(400).json({ error: "请填写补充说明" });
   item.notes = item.notes || [];

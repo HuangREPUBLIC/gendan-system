@@ -52,7 +52,7 @@ function vDetail() {
   const cardFields = (s, card) => state.fields[s].filter(f => fieldCard(f) === card);
   const canEditOrd = canEditSection(o, "order");
   const canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
-  const canInsp = canWriteInspProblem(o), canFix = canWriteInspFix(o);
+  const canInsp = canInspect(o);
   const rowHtml = (f, value) => `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>${value}</div>`;
   const readonlyVal = f => `<div class="row-value">${esc(displayVal(o, f)) || "—"}</div>`;
   // 款式图在抬头显示，这里不重复
@@ -127,7 +127,7 @@ function vDetail() {
         <div class="field" style="border:0"><span>照片</span>${photoPicker("insp")}</div>
         <div class="btn-row"><button class="btn mini ghost" onclick="A.inspAddRow()">＋ 再加一条</button>
           <button class="btn mini" onclick="A.saveInsp('${o.id}')">保存验货记录</button></div></div>` : ""}
-      ${o.inspections.length ? o.inspections.slice().sort((a, b) => b.t - a.t).map(g => inspBatchHtml(o, g, canInsp, canFix)).join("")
+      ${o.inspections.length ? o.inspections.slice().sort((a, b) => b.t - a.t).map(g => inspBatchHtml(o, g, canInsp)).join("")
         : `<div class="empty">暂无验货记录</div>`}</div>
   </section>
 

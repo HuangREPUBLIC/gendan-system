@@ -56,7 +56,6 @@ function sectionPerm(o, section, orderKey, prodKey) {
   return !!(p[orderKey] || p[prodKey]);
 }
 const canEditSection = (o, section) => sectionPerm(o, section, "editOrder", "editProd");
-const canEditBasic = o => canEditSection(o);
 const canAddLog = (o, section) => sectionPerm(o, section, "logOrder", "logProd");
 // 改/删记录：看得到这单才行；自己写的可以(职位权限全关掉的只读账号除外)，别人写的要有该板块的编辑权
 function canTouchEntry(o, e, section) {
@@ -69,8 +68,8 @@ const hasValue = v => v != null && v !== "" && !(Array.isArray(v) && !v.length);
 // 单独一栏的字段在详情页直接改；填后锁定的(发货日期等)本单有编辑权就能填，填了只有管理员/主管能改
 function canEditQuick(o, f, section) {
   if (!f.lock) return canEditSection(o, section);
-  if (!canEditBasic(o)) return false;
+  if (!canEditSection(o)) return false;
   return isAdmin() || isSupervisor() || !hasValue(o.values[f.k]);
 }
-const canWriteInspProblem = o => isRelated(o) && !!myPerms().inspect;
-const canWriteInspFix = canWriteInspProblem;
+// 验货「发现问题」「整改情况」「补充说明」共用一个开关
+const canInspect = o => isRelated(o) && !!myPerms().inspect;

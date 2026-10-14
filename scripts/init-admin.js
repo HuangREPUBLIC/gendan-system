@@ -5,7 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
-const { db, uid, getSetting, setSetting, seedIfEmpty, ensureDefaults, UPLOAD_DIR } = require("../server/db");
+const { db, uid, seedIfEmpty, ensureDefaults, UPLOAD_DIR } = require("../server/db");
 const { hashPassword } = require("../server/auth");
 
 const args = process.argv.slice(2);

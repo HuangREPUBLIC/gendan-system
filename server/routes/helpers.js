@@ -41,5 +41,5 @@ const NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationsh
 const relsXml = rels => XML_HEAD + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
   rels.map(([id, type, target]) => `<Relationship Id="${id}" Type="${NS_REL}/${type}" Target="${target}"/>`).join("") + `</Relationships>`;
 
-module.exports = { getFields, allFields, getFactories, activeUser, activeUsers, orderPublic, loadAllOrders, allOrdersPublic, visibleOrdersPublic, logFields,
+module.exports = { getFields, allFields, getFactories, activeUser, activeUsers, orderPublic, allOrdersPublic, visibleOrdersPublic, logFields,
   FIELD_TYPES, USER_FIELD_TYPES, MULTI_FIELD_TYPES, PHOTO_EXT, XML_HEAD, NS_REL, relsXml };

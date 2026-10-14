@@ -7,7 +7,7 @@ const fs = require("fs");
 const XLSX = require("xlsx");
 const AdmZip = require("adm-zip");
 const { uid, UPLOAD_DIR } = require("../db");
-const { PHOTO_EXT, relsXml } = require("./helpers");
+const { PHOTO_EXT } = require("./helpers");
 
 const router = express.Router();
 

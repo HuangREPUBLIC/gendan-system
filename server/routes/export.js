@@ -122,7 +122,6 @@ async function* zipChunks(files) {
 }
 
 const exportingUsers = new Set();  // 同一人同时只跑一份导出
-router.get("/export", A.adminRequired, (req, res, next) => sendExport(req.user, req.query.season, res, next));
 
 // 一次性下载链接：5 分钟有效、只能用一次，交给浏览器自带下载管理器下载；链接不含登录凭证
 const exportTickets = new Map();
