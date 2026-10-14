@@ -187,6 +187,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   ok(!app().includes("txt-cutting"), "改回跟随职位后打卡框又没了");
   await patchLiu({ scope: "factory", factories: ["宏发制衣厂"] }); await window.refresh(); window.render(); await sleep(150);
   ok(app().includes("txt-cutting"), "只看宏发制衣厂：宏发的单上也出现职位允许的打卡框");
+  window.go("orders"); await sleep(200);
+  const facSel = doc.querySelector('select[aria-label="按工厂筛选"]');
+  ok(facSel.disabled && facSel.options.length === 1 && facSel.options[0].textContent.includes("宏发制衣厂"),
+    "只看指定工厂的人：首页工厂筛选锁成他的工厂，不列别的工厂");
   await patchLiu({ scope: "" }); await window.refresh(); window.render(); await sleep(150);
   // 只读职位(主管模板、权限全关)：能看订单，但页面上没有任何改动入口
   const asAdmin = (m, p, b) => fetch(BASEU + "/api" + p, { method: m,

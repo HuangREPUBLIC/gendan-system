@@ -17,6 +17,9 @@ function statFilterChip() {
     <a href="javascript:void(0)" onclick="A.setStatFilter('all')" title="取消筛选">✕</a></span>`;
 }
 function vOrders() {
+  // 只看指定工厂的人：工厂筛选锁成他的工厂，不列别的工厂(他看到的单服务端已按工厂过滤)
+  const lockedFactories = myPerms().scope === "factory" ? (me().scopeFactories || []) : null;
+  const factoryKw = lockedFactories ? "" : filt.factoryKw;
   // 概览卡片的数字跟随其它筛选条件
   const baseFiltered = state.orders.filter(o =>
     (!filt.season || o.season === filt.season) &&
@@ -24,7 +27,7 @@ function vOrders() {
     (!filt.follower || o.values.follower === filt.follower) &&
     (!filt.kw || [o.values.styleNo, o.values.styleName, o.values.style]
       .join(" ").toLowerCase().includes(filt.kw.toLowerCase())) &&
-    (!filt.factoryKw || orderFactories(o).includes(filt.factoryKw))
+    (!factoryKw || orderFactories(o).includes(factoryKw))
   );
   const list = baseFiltered.filter(o =>
     (!filt.ship || (filt.ship === "shipped" ? !!o.values.shipDate : !o.values.shipDate)) &&
@@ -75,7 +78,8 @@ function vOrders() {
       <select class="in${filt.season ? " on" : ""}" aria-label="按季节筛选" onchange="A.setF('season',this.value)"><option value="">全部季节</option>${opt(seasonOptions("").map(s => [s, s]), filt.season)}</select>
       ${hidePeopleFilter("sales") ? "" : `<select class="in${filt.sales ? " on" : ""}" aria-label="按业务员筛选" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(peopleOpts("sales", "sales"), filt.sales)}</select>`}
       ${hidePeopleFilter("follower") ? "" : `<select class="in${filt.follower ? " on" : ""}" aria-label="按下厂员筛选" onchange="A.setF('follower',this.value)"><option value="">全部下厂员</option>${opt(peopleOpts("follower", "follower"), filt.follower)}</select>`}
-      <select class="in${filt.factoryKw ? " on" : ""}" aria-label="按工厂筛选" onchange="A.setF('factoryKw',this.value)"><option value="">全部工厂</option>${opt(allFactories.map(x => [x, x]), filt.factoryKw)}</select>
+      ${lockedFactories ? `<select class="in on" aria-label="按工厂筛选" disabled title="只能看这些工厂的订单"><option>工厂：${esc(lockedFactories.join("、"))}</option></select>`
+        : `<select class="in${filt.factoryKw ? " on" : ""}" aria-label="按工厂筛选" onchange="A.setF('factoryKw',this.value)"><option value="">全部工厂</option>${opt(allFactories.map(x => [x, x]), filt.factoryKw)}</select>`}
       </div>
     </div></div></section>
   <section class="group">
