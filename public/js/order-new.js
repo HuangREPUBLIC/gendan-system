@@ -2,6 +2,7 @@
 // 新建订单页（批量导入入口也在这一页）
 
 function vNew() {
+  if (!canCreateOrder()) return `<div class="card"><div class="empty">你的职位没有新建订单的权限</div></div>`;
   const scalars = scalarFields;
   if (!photoDraft.img) photoDraft.img = [];
   // 日期默认今天，但填后锁定的(发货日期等)不能默认

@@ -134,7 +134,7 @@ function notifyOrder(actor, o, what) {
     // 只发给在职的人：离职员工还挂在老订单上，但不能再收到通知和推送；主管看不到这单(被设成只看自己)就不发
     const related = new Set([v.sales, v.follower, o.created_by]);
     const ids = new Set();
-    db.prepare("SELECT id, role, scope FROM users WHERE deleted = 0").all().forEach(u => {
+    db.prepare("SELECT id, role, scope, scope_factories FROM users WHERE deleted = 0").all().forEach(u => {
       if (related.has(u.id) || u.role === "admin" || (A.roleTemplate(u.role) === "supervisor" && A.canViewOrder(u, o))) ids.add(u.id);
     });
     ids.delete(actor.id);

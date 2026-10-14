@@ -437,12 +437,58 @@ async function call(method, path, token, body) {
   const sup = (await call("POST", "/users", aT, { name: "范围测试主管", phone: "13900005556", role: supK })).j;
   const supT = (await call("POST", "/login", null, { phone: "13900005556", password: "123456" })).j.token;
   ok((await call("GET", `/orders/${so.id}`, supT)).status === 200, "主管默认看全部");
+  const supOldNote = (await call("POST", `/orders/${so.id}/follow`, supT, { text: "限制前写在别人单上的小结" })).j.followIssues
+    .find(e => e.text === "限制前写在别人单上的小结");
   await call("PATCH", `/users/${sup.id}`, aT, { scope: "own" });
   const supOwn = (await call("POST", "/orders", supT, { season: "SS2027", values: { styleNo: "SCOPE-SUP" } })).j;
   ok((await call("GET", `/orders/${supOwn.id}`, supT)).status === 200, "主管单独设成只看自己：自己建的单照样能看");
   ok((await call("GET", `/orders/${so.id}`, supT)).status === 403, "主管单独设成只看自己：别人的单看不到");
+  ok((await call("PATCH", `/orders/${so.id}/follow/${supOldNote.id}`, supT, { text: "偷偷改" })).status === 403
+    && (await call("DELETE", `/orders/${so.id}/follow/${supOldNote.id}`, supT)).status === 403,
+    "看不到的单上，自己以前写的记录也不能改删(不会借此读到整张单)");
   await call("PATCH", `/orders/${so.id}`, aT, { values: { styleName: "主管不该收到这条" } });
   ok(!(await call("GET", "/notifications", supT)).j.some(n => n.orderId === so.id), "也不再收到看不到的单的通知");
+  // 只看指定工厂：订单上任一工厂(服装/面料/绣花/印花)在名单里就能看，加上自己相关的单；别的单看不到、也不收通知
+  const fo = (await call("POST", "/orders", aT, { season: "SS2027", values: { styleNo: "SCOPE-FAC", factory: "惠锦测试厂" } })).j;
+  const fo2 = (await call("POST", "/orders", aT, { season: "SS2027", values: { styleNo: "SCOPE-FAC2", embFactory: ["惠锦测试厂"] } })).j;
+  const fo3 = (await call("POST", "/orders", aT, { season: "SS2027", values: { styleNo: "SCOPE-FAC3", factory: "别的厂", fabricFactory1: ["惠锦测试厂2"] } })).j;
+  const fo4 = (await call("POST", "/orders", aT, { season: "SS2027", values: { styleNo: "SCOPE-FAC4", fabricFactory2: ["惠锦测试厂 "] } })).j;
+  ok((await call("PATCH", `/users/${sup.id}`, aT, { scope: "factory", factories: [" "] })).j.error === "请至少选一个工厂", "只看指定工厂时至少要选一个工厂");
+  const setFac = await call("PATCH", `/users/${sup.id}`, aT, { scope: "factory", factories: ["惠锦测试厂", " 惠锦测试厂 "] });
+  ok(setFac.status === 200 && setFac.j.scope === "factory" && JSON.stringify(setFac.j.scopeFactories) === '["惠锦测试厂"]', "设成只看惠锦(去掉重复和空格)");
+  const facIds = (await call("GET", "/bootstrap", supT)).j.orders.map(o => o.id);
+  ok(facIds.includes(fo.id) && facIds.includes(fo2.id) && facIds.includes(fo4.id) && facIds.includes(supOwn.id) && !facIds.includes(so.id),
+    "只看到惠锦的单(服装/绣花/面料工厂是惠锦都算，前后多个空格也认)和自己建的单");
+  ok(!facIds.includes(fo3.id), "别的厂的单看不到(名字只是像也不算)");
+  ok((await call("GET", `/orders/${so.id}`, supT)).status === 403, "直接打开别的单也不行");
+  ok(!(await call("GET", `/users/${sup.id}/logs`, supT)).j.some(r => r.orderId === so.id), "「我的打卡记录」里也不列看不到的单");
+  ok((await call("POST", `/orders/${fo.id}/logs`, supT, { key: "fabricProg", text: "惠锦单上打卡" })).status === 200, "惠锦的单上照职位勾选能打卡");
+  await call("PATCH", `/orders/${so.id}`, aT, { values: { styleName: "只看惠锦的主管不该收到" } });
+  await call("PATCH", `/orders/${fo.id}`, aT, { values: { styleName: "只看惠锦的主管该收到" } });
+  const facNotifs = (await call("GET", "/notifications", supT)).j;
+  ok(facNotifs.some(n => n.orderId === fo.id) && !facNotifs.some(n => n.orderId === so.id), "只收到看得到的单的通知");
+  const offFac = await call("PATCH", `/users/${sup.id}`, aT, { scope: "" });
+  ok(offFac.j.scope === "" && offFac.j.scopeFactories.length === 0, "改回跟随职位后工厂名单清掉");
+  // 只读：职位的权限全关掉就只能看，连自己以前写的记录也不能改删
+  const roK = (await call("POST", "/roles", aT, { label: "范围测试只读", template: "supervisor" })).j.find(r => r.label === "范围测试只读").k;
+  await call("PATCH", `/roles/${roK}/perms`, aT, { perms: { editOrder: false, editProd: false, logOrder: false, logProd: false, createOrder: false, inspect: false } });
+  const ro = (await call("POST", "/users", aT, { name: "只读测试", phone: "13900005558", role: supK })).j;
+  const roT = (await call("POST", "/login", null, { phone: "13900005558", password: "123456" })).j.token;
+  const roNote = (await call("POST", `/orders/${so.id}/follow`, roT, { text: "只读前写的" })).j.followIssues.find(e => e.text === "只读前写的");
+  await call("PATCH", `/users/${ro.id}`, aT, { role: roK });
+  ok((await call("GET", `/orders/${so.id}`, roT)).status === 200, "只读的人照样能看");
+  const roWrites = [
+    await call("POST", `/orders/${so.id}/follow`, roT, { text: "只读后想写" }),
+    await call("POST", `/orders/${so.id}/logs`, roT, { key: "fabricProg", text: "只读后想打卡" }),
+    await call("PATCH", `/orders/${so.id}`, roT, { values: { styleName: "只读后想改" } }),
+    await call("POST", "/orders", roT, { season: "SS2027", values: { styleNo: "只读后想新建" } }),
+    await call("POST", `/orders/${so.id}/inspections`, roT, { problems: ["只读后想写验货"] }),
+    await call("PATCH", `/orders/${so.id}/follow/${roNote.id}`, roT, { text: "只读后改自己的" }),
+    await call("DELETE", `/orders/${so.id}/follow/${roNote.id}`, roT)
+  ];
+  ok(roWrites.every(r => r.status === 403), "只读：不能打卡、改单、新建、写验货和小结，连自己以前写的也不能改删");
+  await call("DELETE", `/users/${ro.id}`, aT); await call("DELETE", `/roles/${roK}`, aT);
+  for (const x of [fo, fo2, fo3, fo4]) await call("DELETE", `/orders/${x.id}`, aT);
   await call("DELETE", `/orders/${supOwn.id}`, aT); await call("DELETE", `/users/${sup.id}`, aT); await call("DELETE", `/roles/${supK}`, aT);
   await call("DELETE", `/orders/${so.id}`, aT); await call("DELETE", `/users/${sc.id}`, aT);
 

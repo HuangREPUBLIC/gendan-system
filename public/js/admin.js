@@ -10,19 +10,22 @@ const PERM_LABELS = [
   ["inspect",     "验货问题与整改",          ""]
 ];
 const TEMPLATE_LABEL = { sales: "业务员", follower: "下厂员", supervisor: "主管" };
-const SCOPE_LABEL = { own: "只看自己相关的订单", all: "看全部订单" };
+const SCOPE_LABEL = { own: "只看自己相关的订单", all: "看全部订单", factory: "只看指定工厂的订单" };
 
 function adminPeopleHtml() {
   const roleCell = u => u.role === "admin"
     ? `<span class="tag role">管理员</span>`
     : `<select class="in tbl-select" onchange="A.changeRole('${u.id}',this.value)">
         ${state.roles.map(r => `<option value="${esc(r.k)}" ${u.role === r.k ? "selected" : ""}>${esc(r.label)}</option>`).join("")}</select>`;
-  // 个人看订单范围：默认跟随职位(括号里是职位现在的范围)
+  // 个人看订单范围：默认跟随职位(括号里是职位现在的范围)；只看指定工厂的写明是哪些工厂，旁边能改
   const scopeCell = u => {
     const roleScope = permsOfRole(state.roles.find(r => r.k === u.role) || {}).scope;
-    const opt = (v, t) => `<option value="${v}" ${(u.scope || "") === v ? "selected" : ""}>${t}</option>`;
+    const isFac = u.scope === "factory";
+    const opt = (v, t) => `<option value="${v}" ${(u.scope || "") === v ? "selected" : ""}>${esc(t)}</option>`;
     return `<select class="in tbl-select" aria-label="${esc(u.name)}的看订单范围" onchange="A.setUserScope('${u.id}',this.value)">
-      ${opt("", `跟随职位（${roleScope === "all" ? "看全部" : "只看自己"}）`)}${opt("own", SCOPE_LABEL.own)}${opt("all", SCOPE_LABEL.all)}</select>`;
+      ${opt("", `跟随职位（${roleScope === "all" ? "看全部" : "只看自己"}）`)}${opt("own", SCOPE_LABEL.own)}${opt("all", SCOPE_LABEL.all)}${
+      opt("factory", isFac ? "只看工厂：" + (u.scopeFactories || []).join("、") : SCOPE_LABEL.factory)}</select>${
+      isFac ? ` <button type="button" class="btn mini ghost" onclick="A.pickScopeFactories('${u.id}')">改工厂</button>` : ""}`;
   };
   const kw = adminUserFilt.kw.trim().toLowerCase();
   const allStaff = state.users.filter(u => u.role !== "admin");
@@ -228,8 +231,32 @@ Object.assign(A, {
     await run(() => api("PATCH", "/users/" + id, { role }), `已把 ${u ? u.name : ""} 的职位改为${labelForRoleKey(role)}`);
   },
   async setUserScope(id, scope) {
+    if (scope === "factory") return A.pickScopeFactories(id);
     const u = userById(id);
     await run(() => api("PATCH", "/users/" + id, { scope }), `已把 ${u ? u.name : ""} 的看订单范围改为${SCOPE_LABEL[scope] || "跟随职位"}`);
+  },
+  // 只看指定工厂：从工厂下拉选项和订单上出现过的工厂里勾选(导入的单写法可能不一样)；取消就恢复原样
+  pickScopeFactories(id) {
+    const u = userById(id); if (!u) return;
+    const fac = state.factories;
+    const cur = u.scope === "factory" ? u.scopeFactories || [] : [];
+    // 已选的放最前(哪怕已不在名单里)；名字去掉首尾空格，跟服务端比对一致
+    const names = [...new Set([...cur, ...(fac.prod || []), ...(fac.fabric || []), ...(fac.emb || []), ...state.orders.flatMap(orderFactories)]
+      .map(s => String(s).trim()).filter(Boolean))];
+    if (!names.length) { render(); return toast("还没有工厂，请先在「表单配置 → 工厂下拉选项」里添加"); }
+    // 「自己相关的单」按职位模板算(同 auth.js isRelated)
+    const own = { sales: "他自己建的、或他是业务员的单", follower: "他是下厂员的单" }[u.template] || "他自己建的、或他是业务员/下厂员的单";
+    modal({ title: `${u.name} 只能看哪些工厂的订单？`, okText: "保存", keepOpenOnOk: true, onCancel: render,
+      html: `<div style="max-height:50vh;overflow:auto">${names.map(n => `<label class="perm-row">
+          <input type="checkbox" class="sf-pick" value="${esc(n)}" ${cur.includes(n) ? "checked" : ""}>
+          <span class="perm-main"><span class="perm-name">${esc(n)}</span></span></label>`).join("")}</div>
+        <div class="row-sub" style="margin-top:8px">订单的服装/面料/绣花/印花工厂任一是勾选的工厂就能看到；另外${own}也能看到。</div>`,
+      onOk: async () => {
+        const factories = [...document.querySelectorAll(".sf-pick:checked")].map(x => x.value);
+        if (!factories.length) return toast("请至少勾选一个工厂");
+        A.modalCancel();
+        await run(() => api("PATCH", "/users/" + id, { scope: "factory", factories }), `已设置 ${u.name} 只看：${factories.join("、")}`);
+      } });
   },
   deleteUser(id) {
     const u = userById(id); if (!u) return;

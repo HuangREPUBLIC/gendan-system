@@ -132,12 +132,12 @@ function vDetail() {
   </section>
 
   <section class="group g-follow">
-    <div class="group-title"><span class="cat-title">四、跟单小结</span><button class="btn mini ghost right" onclick="A.toggleAdd('follow')">＋ 添加</button></div>
+    <div class="group-title"><span class="cat-title">四、跟单小结</span>${canOrdLog || canProdLog ? `<button class="btn mini ghost right" onclick="A.toggleAdd('follow')">＋ 添加</button>` : ""}</div>
     <div class="card">
-      <div class="addbox" id="add-follow" style="padding:12px 16px">
+      ${canOrdLog || canProdLog ? `<div class="addbox" id="add-follow" style="padding:12px 16px">
         <textarea class="in" id="txt-follow" placeholder="填写跟单过程中的问题、沟通事项…"></textarea>
         ${photoPicker("follow")}
-        <div style="margin-top:8px"><button class="btn mini" onclick="A.addFollow('${o.id}')">提交</button></div></div>
+        <div style="margin-top:8px"><button class="btn mini" onclick="A.addFollow('${o.id}')">提交</button></div></div>` : ""}
       ${o.followIssues.length ? `<ul class="log" style="padding:4px 16px 12px">${o.followIssues.slice().sort((a, b) => b.t - a.t).map(e => `<li>
         <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>${canTouchEntry(o, e) ? `<span class="act-row">
           <button type="button" class="act-btn" onclick="A.editFollow('${o.id}','${e.id}')">改</button>

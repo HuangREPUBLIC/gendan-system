@@ -17,7 +17,6 @@ function statFilterChip() {
     <a href="javascript:void(0)" onclick="A.setStatFilter('all')" title="取消筛选">✕</a></span>`;
 }
 function vOrders() {
-  const factoriesOf = o => [o.values.factory, o.values.fabricFactory1, o.values.fabricFactory2, o.values.embFactory, o.values.printFactory].flat().filter(Boolean);
   // 概览卡片的数字跟随其它筛选条件
   const baseFiltered = state.orders.filter(o =>
     (!filt.season || o.season === filt.season) &&
@@ -25,7 +24,7 @@ function vOrders() {
     (!filt.follower || o.values.follower === filt.follower) &&
     (!filt.kw || [o.values.styleNo, o.values.styleName, o.values.style]
       .join(" ").toLowerCase().includes(filt.kw.toLowerCase())) &&
-    (!filt.factoryKw || factoriesOf(o).includes(filt.factoryKw))
+    (!filt.factoryKw || orderFactories(o).includes(filt.factoryKw))
   );
   const list = baseFiltered.filter(o =>
     (!filt.ship || (filt.ship === "shipped" ? !!o.values.shipDate : !o.values.shipDate)) &&
@@ -36,7 +35,7 @@ function vOrders() {
   const allFactories = [...new Set([...state.factories.prod, ...state.factories.fabric, ...state.factories.emb])];
   // 只看自己相关订单时，业务员不显示业务员筛选、下厂员不显示下厂员筛选
   const myTemplate = (me() || {}).template;
-  const hidePeopleFilter = tpl => myTemplate === tpl && myPerms().scope !== "all";
+  const hidePeopleFilter = tpl => myTemplate === tpl && myPerms().scope === "own";
   // 筛选里的人：在职的按职位列；离职的只要还挂在看得到的订单上也列出来，方便找他的单交接
   const peopleOpts = (tpl, k) => [...state.users.filter(u => u.template === tpl).map(u => [u.id, u.name]),
     ...state.formerUsers.filter(u => state.orders.some(o => o.values[k] === u.id)).map(u => [u.id, u.name + "（已离职）"])];
@@ -92,7 +91,7 @@ function vOrders() {
           ${isRecent(latest)
             ? `<div class="o-latest">最新：${esc(latest.fieldLabel)} · ${esc(latest.text)} <span class="num">(${fmtT(latest.t)})</span></div>` : ""}
         </div><span class="chev">›</span></div>`;
-    }).join("") || `<div class="empty">${state.orders.length ? "没有符合条件的订单" : "还没有订单，点右上角 ＋ 新建"}</div>`}</div>
+    }).join("") || `<div class="empty">${state.orders.length ? "没有符合条件的订单" : canCreateOrder() ? "还没有订单，点右上角 ＋ 新建" : "还没有订单"}</div>`}</div>
   </section>`;
 }
 

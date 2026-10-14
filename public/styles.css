@@ -307,7 +307,7 @@ table.tbl{border-collapse:collapse;width:100%;font-size:var(--fs-body);min-width
   .tbl.stack td:nth-child(2){grid-area:phone;color:var(--ink-2);font-size:var(--fs-sub)}
   .tbl.stack td:nth-child(3){grid-area:role;align-self:center}
   /* 看订单范围单独一行；手机上表头隐藏了，用 ::before 补上名称 */
-  .tbl.stack td:nth-child(4){grid-area:scope;display:flex;align-items:center;gap:8px;padding-top:10px}
+  .tbl.stack td:nth-child(4){grid-area:scope;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-top:10px}
   .tbl.stack td:nth-child(4)::before{content:"看订单范围";color:var(--ink-2);font-size:var(--fs-sub);white-space:nowrap}
   .tbl.stack td:nth-child(4) select{min-width:0}
   .tbl.stack td:nth-child(5){grid-area:acts;display:flex;flex-wrap:wrap;gap:8px;padding-top:10px}

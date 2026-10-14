@@ -75,7 +75,7 @@ function sidebarHtml() {
   const m = me();
   const groups = [
     ["总览", [["orders", "订单列表", ICONS.orders]]],
-    ["业务", [["new", "新建订单", ICONS.plus], ["chat", "聊天", ICONS.chat]]],
+    ["业务", [...(canCreateOrder() ? [["new", "新建订单", ICONS.plus]] : []), ["chat", "聊天", ICONS.chat]]],
     ["系统", [
       ...(m.template === "admin" ? [["admin", "管理后台", ICONS.admin]] : []),
       ["notifs", "消息通知", ICONS.bell],

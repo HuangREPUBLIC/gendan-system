@@ -39,10 +39,16 @@ function roleLabel(roleKey) {
   return r ? r.label : roleKey;
 }
 
+// 只认字符串数组：库里是脏数据时按没有名单算(只看自己相关)，不会放大权限
+function scopeFactoriesOf(u) {
+  try { const a = JSON.parse((u && u.scope_factories) || "[]"); return Array.isArray(a) ? a.filter(x => typeof x === "string" && x) : []; }
+  catch (e) { return []; }
+}
 function userPublic(u) {
   if (!u) return null;
   return { id: u.id, name: u.name, phone: u.phone, role: u.role,
-    roleLabel: roleLabel(u.role), template: roleTemplate(u.role), deleted: !!u.deleted, scope: u.scope || "" };
+    roleLabel: roleLabel(u.role), template: roleTemplate(u.role), deleted: !!u.deleted, scope: u.scope || "",
+    scopeFactories: scopeFactoriesOf(u) };
 }
 const userById = (id) => db.prepare("SELECT * FROM users WHERE id = ?").get(id);
 
@@ -77,23 +83,33 @@ const TEMPLATE_PERMS = {
   supervisor: { scope: "all", editOrder: true,  editProd: true,  logOrder: true,  logProd: true,  createOrder: true, inspect: true }
 };
 const PERM_KEYS = ["editOrder", "editProd", "logOrder", "logProd", "createOrder", "inspect"];
+// 看订单范围：own 只看自己相关 / all 全部 / factory 指定工厂的单加自己相关(只能按人设)
+const SCOPES = ["own", "all", "factory"];
+// 订单上的工厂：服装/面料/绣花/印花，同前端「按工厂筛选」
+const ORDER_FACTORY_KEYS = ["factory", "fabricFactory1", "fabricFactory2", "embFactory", "printFactory"];
 function permsOf(u) {
   if (isAdmin(u)) return TEMPLATE_PERMS.supervisor;   // 管理员永远全权，不可配置
   const base = TEMPLATE_PERMS[templateOf(u)] || TEMPLATE_PERMS.follower;
   const rolePerms = (findRole(u && u.role) || {}).perms;
-  const saved = u && (u.scope === "own" || u.scope === "all") ? Object.assign({}, rolePerms, { scope: u.scope }) : rolePerms;
+  const saved = u && SCOPES.includes(u.scope) ? Object.assign({}, rolePerms, { scope: u.scope }) : rolePerms;
   if (!saved) return base;
   // 只认已知键，脏数据不会放大权限
   const out = Object.assign({}, base);
-  if (saved.scope === "all" || saved.scope === "own") out.scope = saved.scope;
+  if (SCOPES.includes(saved.scope)) out.scope = saved.scope;
   PERM_KEYS.forEach(k => { if (typeof saved[k] === "boolean") out[k] = saved[k]; });
   return out;
 }
 // 是否本单相关人员：scope=all 全部相关，否则按模板认归属
 function isRelated(u, order) {
   if (!u || !order) return false;
-  if (permsOf(u).scope === "all") return true;
+  const scope = permsOf(u).scope;
+  if (scope === "all") return true;
   const v = (order.data && order.data.values) || {};
+  // 只看指定工厂：订单上任一工厂在他的名单里就算；自己相关的单照样按下面算
+  if (scope === "factory") {
+    const mine = scopeFactoriesOf(u);
+    if (ORDER_FACTORY_KEYS.some(k => [].concat(v[k] || []).some(f => mine.includes(String(f).trim())))) return true;
+  }
   const t = templateOf(u);
   if (t === "sales") return v.sales === u.id || order.created_by === u.id;
   if (t === "follower") return v.follower === u.id;
@@ -114,10 +130,11 @@ const canEditBasic = (u, order) => canEditSection(u, order);
 // 打卡与改字段是独立开关
 const canAddLog = (u, order, section) => sectionPerm(u, order, section, "logOrder", "logProd");
 const canCreateOrder = (u) => !!u && !!permsOf(u).createOrder;
-// 改/删记录：自己写的可以，别人写的要有该板块的编辑权
+// 改/删记录：看得到这单才行；自己写的可以(职位权限全关掉的只读账号除外)，别人写的要有该板块的编辑权
 function canTouchEntry(u, order, entry, section) {
-  if (!u) return false;
-  if (entry && entry.by === u.id) return true;
+  if (!u || !isRelated(u, order)) return false;
+  const p = permsOf(u);
+  if (entry && entry.by === u.id && PERM_KEYS.some(k => p[k])) return true;
   return canEditSection(u, order, section);
 }
 // 验货「发现问题」「整改情况」共用一个开关

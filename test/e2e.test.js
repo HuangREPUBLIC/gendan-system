@@ -117,6 +117,15 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   ok(st().users.find(u => u.id === chenU.id).scope === "all", "改了立即保存");
   await A.setUserScope(chenU.id, ""); await sleep(400);
   ok(st().users.find(u => u.id === chenU.id).scope === "", "改回跟随职位");
+  // 只看指定工厂：选这一项弹出勾选工厂，保存后下拉里写明只看哪个工厂
+  await A.setUserScope(chenU.id, "factory"); await sleep(150);
+  const facBox = [...doc.querySelectorAll(".sf-pick")].find(b => b.value === "宏发制衣厂");
+  ok(!!facBox, "选「只看指定工厂的订单」弹出工厂勾选框");
+  facBox.checked = true;
+  await A.modalOk(); await sleep(400);
+  const chenNow = st().users.find(u => u.id === chenU.id);
+  ok(chenNow.scope === "factory" && chenNow.scopeFactories.join() === "宏发制衣厂" && app().includes("只看工厂：宏发制衣厂"), "勾选保存后生效，下拉里写明只看哪个工厂");
+  await A.setUserScope(chenU.id, ""); await sleep(400);
 
   // 新建订单（季节下拉）
   window.go("new"); await sleep(200);
@@ -170,12 +179,24 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   window.go("detail", o1.id); await sleep(250); // o1 归王建国，跟刘敏(o2 下厂员)无关
   ok(!app().includes("txt-cutting"), "谁负责的内容谁有权限：跟本单无关的下厂员看不到打卡框");
   // 管理员单独给她设成看全部：按钮跟着个人范围走(服务端同规则)
-  const setLiuScope = scope => fetch(BASEU + "/api/users/" + st().me.id, { method: "PATCH",
-    headers: { "Content-Type": "application/json", Authorization: "Bearer " + adminToken }, body: JSON.stringify({ scope }) });
-  await setLiuScope("all"); await window.refresh(); window.render(); await sleep(150);
+  const patchLiu = body => fetch(BASEU + "/api/users/" + st().me.id, { method: "PATCH",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + adminToken }, body: JSON.stringify(body) });
+  await patchLiu({ scope: "all" }); await window.refresh(); window.render(); await sleep(150);
   ok(app().includes("txt-cutting"), "单独设成看全部后，别人的单上也出现职位允许的打卡框");
-  await setLiuScope(""); await window.refresh(); window.render(); await sleep(150);
+  await patchLiu({ scope: "" }); await window.refresh(); window.render(); await sleep(150);
   ok(!app().includes("txt-cutting"), "改回跟随职位后打卡框又没了");
+  await patchLiu({ scope: "factory", factories: ["宏发制衣厂"] }); await window.refresh(); window.render(); await sleep(150);
+  ok(app().includes("txt-cutting"), "只看宏发制衣厂：宏发的单上也出现职位允许的打卡框");
+  await patchLiu({ scope: "" }); await window.refresh(); window.render(); await sleep(150);
+  // 只读职位(主管模板、权限全关)：能看订单，但页面上没有任何改动入口
+  const asAdmin = (m, p, b) => fetch(BASEU + "/api" + p, { method: m,
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + adminToken }, body: b ? JSON.stringify(b) : undefined }).then(r => r.json());
+  const roRoleK = (await asAdmin("POST", "/roles", { label: "E2E只读", template: "supervisor" })).find(r => r.label === "E2E只读").k;
+  await asAdmin("PATCH", `/roles/${roRoleK}/perms`, { perms: { editOrder: false, editProd: false, logOrder: false, logProd: false, createOrder: false, inspect: false } });
+  await patchLiu({ role: roRoleK }); await window.refresh(); window.go("detail", o1.id); await sleep(250);
+  ok(app().includes("一、订单明细") && !/A\.(editLog|delLog|editFollow|delFollow|quickSet|toggleBasic|toggleFollower|addLog)\(|toggleAdd\('follow'\)|go\('new'\)/.test(app()),
+    "只读职位：能看订单，但没有改/删、打卡、跟单小结、新建订单这些入口");
+  await patchLiu({ role: "follower" }); await asAdmin("DELETE", "/roles/" + roRoleK);
 
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);

@@ -3,7 +3,7 @@
 const express = require("express");
 const { db, uid, getSetting } = require("../db");
 const A = require("../auth");
-const { activeUser, activeUsers, allOrdersPublic, logFields } = require("./helpers");
+const { activeUser, activeUsers, allOrdersPublic, visibleOrdersPublic, logFields } = require("./helpers");
 
 const router = express.Router();
 
@@ -26,16 +26,20 @@ router.post("/users", A.adminRequired, (req, res) => {
 router.patch("/users/:id", A.adminRequired, (req, res) => {
   const u = activeUser(req.params.id);
   if (!u) return res.status(404).json({ error: "员工不存在" });
-  const { name, phone, role, scope } = req.body || {};
-  // 个人看订单范围：""/null 跟随职位
-  if (scope !== undefined && ![null, "", "own", "all"].includes(scope)) return res.status(400).json({ error: "看订单范围不对" });
+  const { name, phone, role, scope, factories } = req.body || {};
+  // 个人看订单范围：""/null 跟随职位；factory 要带工厂名单
+  if (scope !== undefined && ![null, "", "own", "all", "factory"].includes(scope)) return res.status(400).json({ error: "看订单范围不对" });
+  const facList = scope === "factory"
+    ? [...new Set((Array.isArray(factories) ? factories : []).map(x => String(x).trim()).filter(Boolean))].slice(0, 50) : null;
+  if (facList && !facList.length) return res.status(400).json({ error: "请至少选一个工厂" });
   if (role !== undefined) {
     if (u.id === req.user.id) return res.status(400).json({ error: "不能修改自己的职位" });
     if (u.role === "admin") return res.status(400).json({ error: "不能修改管理员的职位" });
     if (!getSetting("roles", []).some(r => r.k === role)) return res.status(400).json({ error: "职位不存在" });
     db.prepare("UPDATE users SET role=? WHERE id=?").run(role, u.id);
   }
-  if (scope !== undefined) db.prepare("UPDATE users SET scope=? WHERE id=?").run(scope || null, u.id);
+  if (scope !== undefined) db.prepare("UPDATE users SET scope=?, scope_factories=? WHERE id=?")
+    .run(scope || null, facList ? JSON.stringify(facList) : null, u.id);
   if (name !== undefined && String(name).trim()) db.prepare("UPDATE users SET name=? WHERE id=?").run(String(name).trim(), u.id);
   if (phone !== undefined && String(phone).trim()) {
     const dup = db.prepare("SELECT id FROM users WHERE phone=? AND id<>? AND deleted=0").get(String(phone).trim(), u.id);
@@ -68,7 +72,8 @@ router.get("/users/:id/logs", (req, res) => {
     return res.status(403).json({ error: "只能查看自己的打卡记录" });
   const logFs = logFields();
   const rows = [];
-  allOrdersPublic().forEach(o => {
+  // 管理员看谁的都列全部订单；自己看只列现在看得到的单
+  (req.user.role === "admin" ? allOrdersPublic() : visibleOrdersPublic(req.user)).forEach(o => {
     const tag = { styleNo: o.values.styleNo || "", styleName: o.values.styleName || "", orderId: o.id };
     logFs.forEach(f => (o.logs[f.k] || []).forEach(e => {
       if (e.by === targetId) rows.push(Object.assign({ label: f.label, text: e.text, t: e.t }, tag));
